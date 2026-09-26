@@ -26,7 +26,7 @@ def build_system_prompt() -> str:
     )
 
 
-def estimate_project(meeting_summary: str) -> str:
+def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
     response = client.chat.completions.create(
         model=settings.LLM_MODEL,
         messages=[
@@ -34,4 +34,9 @@ def estimate_project(meeting_summary: str) -> str:
             {"role": "user", "content": meeting_summary},
         ],
     )
-    return response.choices[0].message.content
+    usage = response.usage
+    return (
+        response.choices[0].message.content,
+        usage.prompt_tokens if usage else 0,
+        usage.completion_tokens if usage else 0,
+    )

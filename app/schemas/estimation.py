@@ -5,3 +5,7 @@ class EstimationRequest(BaseModel):
 
 class EstimationResponse(BaseModel):
     estimation: str
+    model: str
+    provider: str
+    tokens_input: int
+    tokens_output: int
