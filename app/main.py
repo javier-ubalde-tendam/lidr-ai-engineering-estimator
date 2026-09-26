@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-
+from app.config import get_settings
 from app.routers.estimations import router as estimations_router
 
 app = FastAPI(
@@ -14,4 +14,5 @@ app.include_router(estimations_router, prefix="/api/v1")
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    settings = get_settings()
+    return {"status": "ok!", "environment": settings.APP_ENV, "llm": settings.LLM_PROVIDER}
