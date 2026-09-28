@@ -30,3 +30,17 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+# Precios aproximados en USD por cada 1M de tokens. Referencia: pricing pages de OpenAI/Anthropic.
+# Ojo: cambian con el tiempo, revisar periódicamente. Clave = alias de modelo (settings.LLM_MODEL).
+MODEL_PRICING_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+}
+
+
+def estimate_cost_usd(model: str, tokens_input: int, tokens_output: int) -> float | None:
+    pricing = MODEL_PRICING_USD_PER_1M_TOKENS.get(model)
+    if pricing is None:
+        return None
+    return (tokens_input * pricing["input"] + tokens_output * pricing["output"]) / 1_000_000

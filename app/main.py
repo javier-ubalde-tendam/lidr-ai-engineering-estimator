@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from app.config import get_settings
+from app.logging_config import configure_logging
 from app.routers.estimations import router as estimations_router
+
+configure_logging()
 
 app = FastAPI(
     title="LiDR AI Engineering Estimator - Session 02 (CAG)",

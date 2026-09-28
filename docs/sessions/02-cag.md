@@ -21,7 +21,7 @@ Servicio funcional que:
 
 ## Cómo invocar
 
-### Arrancar el servidor
+### Arrancar la aplicación
 uv run uvicorn app.main:app --reload
 
 ### Lanzar petición

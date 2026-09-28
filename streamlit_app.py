@@ -3,7 +3,10 @@ import time
 import streamlit as st
 
 from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
+from app.logging_config import configure_logging
 from app.services.llm_service import build_system_prompt, estimate_project, estimate_project_stream
+
+configure_logging()
 
 st.title("Estimador de Proyectos - Chat")
 
@@ -17,13 +20,18 @@ with st.sidebar:
     with st.expander("Ejemplos inyectados (CAG)"):
         st.text(format_examples_for_prompt(ESTIMATION_EXAMPLES))
 
+# Streamlit reejecuta todo el script en cada interacción; session_state es lo único que persiste entre reruns
+# st.session_state: es un dict-like que sobrevive entre reruns dentro de la misma sesión de navegador
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Repinta el historial acumulado en reruns anteriores (muestra los mensajes guardados en sesión: st.session_state)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
+        # Usamos markdown en lugar de st.text para que se renderice el contenido en formato Markdown
         st.markdown(message["content"])
 
+# Devuelve texto solo en el rerun donde el usuario envía algo; el resto del tiempo es None
 transcription = st.chat_input("Pega aquí la transcripción de la reunión...")
 
 if transcription:
@@ -31,6 +39,7 @@ if transcription:
     with st.chat_message("user"):
         st.markdown(transcription)
 
+    # stats se rellena como efecto lateral dentro del generador de streaming
     stats: dict = {}
     with st.chat_message("assistant"):
         start = time.perf_counter()
@@ -40,6 +49,7 @@ if transcription:
     st.session_state.messages.append({"role": "assistant", "content": estimation})
     st.session_state.last_metrics = stats
 
+# Segundo bloque de sidebar: se ejecuta después de calcular las métricas de esta consulta
 with st.sidebar:
     st.subheader("Última llamada")
     metrics = st.session_state.get("last_metrics")

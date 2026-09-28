@@ -19,7 +19,9 @@ Se añade:
 
 ## Cómo invocar
 
-### Arrancar el servidor
-
+### Arrancar la
+streamlit run streamlit_app.py
 
 ### Lanzar petición
+- Acceder a la local URL: http://localhost:8501
+- Interactuar con el chat
