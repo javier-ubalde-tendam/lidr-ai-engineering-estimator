@@ -1,6 +1,7 @@
 from openai import OpenAI
 from app.config import get_settings
 from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
+from collections.abc import Iterator
 
 settings = get_settings()
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -25,7 +26,7 @@ def build_system_prompt() -> str:
         f"{examples_block}"
     )
 
-
+# Endpoint de FastAPI sin streaming
 def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
     response = client.chat.completions.create(
         model=settings.LLM_MODEL,
@@ -40,3 +41,25 @@ def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
         usage.prompt_tokens if usage else 0,
         usage.completion_tokens if usage else 0,
     )
+
+# Versión con streaming, para la UI de Streamlit
+def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
+    stream = client.chat.completions.create(
+        model=settings.LLM_MODEL,
+        messages=[
+            {"role": "system", "content": build_system_prompt()},
+            {"role": "user", "content": meeting_summary},
+        ],
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+        if chunk.usage:
+            stats["tokens_input"] = chunk.usage.prompt_tokens
+            stats["tokens_output"] = chunk.usage.completion_tokens
+            stats["model_requested"] = settings.LLM_MODEL
+            stats["model_used"] = chunk.model

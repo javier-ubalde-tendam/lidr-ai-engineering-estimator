@@ -18,6 +18,7 @@ When suggesting Python code:
 - highlight meaningful differences with Java
 - prefer simple and readable Python
 - avoid unnecessary abstractions
+- include comments explaining the code in few sentences
 
 When reviewing code:
 - explain WHY a change is recommended
