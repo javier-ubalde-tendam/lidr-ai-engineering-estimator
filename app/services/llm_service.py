@@ -4,6 +4,7 @@ import structlog
 from openai import APITimeoutError, AuthenticationError, OpenAI, RateLimitError
 from openai import APIError as OpenAIAPIError
 
+from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
 from app.config import estimate_cost_usd, get_settings
 from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
 from collections.abc import Iterator
@@ -81,21 +82,50 @@ def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
     return (response.choices[0].message.content, tokens_input, tokens_output)
 
 # Versión con streaming, para la UI de Streamlit. Es un generador (yield en vez de return): la función no ejecuta nada hasta que alguien empieza a iterarla
+def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:
+    # Trocea el texto ya cacheado para reproducir visualmente el mismo efecto que un streaming real
+    for i in range(0, len(text), chunk_size):
+        yield text[i : i + chunk_size]
+        time.sleep(0.01)
+
+
 def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
+    system_prompt = build_system_prompt()
+    cache_key = build_cache_key(meeting_summary, system_prompt)
+    cached_estimation = get_cached_estimation(cache_key)
+    cache_hit = cached_estimation is not None
+
     tokens_input_estimated = len(meeting_summary) // 4
     logger.info(
         "llm_call_started",
         model_requested=settings.LLM_MODEL,
         provider=settings.LLM_PROVIDER,
         tokens_input_estimated=tokens_input_estimated,
+        cache_hit=cache_hit,
     )
 
     start = time.perf_counter()
+    stats["cache_hit"] = cache_hit
+
+    if cache_hit:
+        yield from _simulate_stream_chunks(cached_estimation)
+        latency_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "llm_call_completed",
+            tokens_input=0,
+            tokens_output=0,
+            latency_ms=round(latency_ms, 2),
+            cost_usd=0.0,
+            finish_reason="cache_hit",
+        )
+        return
+
+    full_response_parts: list[str] = []
     try:
         stream = client.chat.completions.create(
             model=settings.LLM_MODEL,
             messages=[
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": meeting_summary},
             ],
             stream=True,
@@ -107,6 +137,7 @@ def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
             if chunk.choices:
                 delta = chunk.choices[0].delta.content
                 if delta:
+                    full_response_parts.append(delta)
                     yield delta
                 finish_reason = chunk.choices[0].finish_reason
                 if finish_reason:
@@ -130,6 +161,8 @@ def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
     except OpenAIAPIError as exc:
         logger.error("llm_call_failed", error_type="server_error", error=str(exc))
         raise
+
+    set_cached_estimation(cache_key, "".join(full_response_parts))
 
     latency_ms = (time.perf_counter() - start) * 1000
     logger.info(

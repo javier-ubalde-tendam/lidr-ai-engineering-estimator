@@ -14,6 +14,7 @@ Servicio funcional que:
 
 ## Tecnologías
 
+- pydantic: uso de ficheros de configuración (p.ej. para variables de entorno, API_KEY, etc.)
 - uv: gestor de paquetes y proyectos para Python de alto rendimiento y ultra rápido. Controla las dependencias, lanza la aplicación, etc. El comando “--reload” recarga el servidor si algún fichero cambia (muy útil para desarrollo)
 - FastAPI: define la aplicación, rutas, validaciones, dependencias, etc. Pero no escucha directamente en un puerto de red. Para eso necesita un servidor ASGI como Uvicorn.
 - Uvicorn: servidor web ASGI

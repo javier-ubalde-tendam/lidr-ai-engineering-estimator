@@ -14,12 +14,16 @@ Se añade:
 
 ## Tecnologías
 
-- 
+- structlog: logging estructurado
+- redis (en docker): Cache
 
 
 ## Cómo invocar
 
-### Arrancar la
+### Levantar docker redis (docker)
+docker run -d --name lidr-redis -p 6379:6379 redis:7-alpine
+
+### Arrancar la aplicación
 streamlit run streamlit_app.py
 
 ### Lanzar petición

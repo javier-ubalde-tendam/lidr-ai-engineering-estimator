@@ -54,6 +54,7 @@ with st.sidebar:
     st.subheader("Última llamada")
     metrics = st.session_state.get("last_metrics")
     if metrics:
+        st.caption(f"**Cache hit:** {metrics.get('cache_hit', False)}")
         st.caption(f"**Modelo solicitado:** {metrics.get('model_requested', '-')}")
         st.caption(f"**Modelo usado:** {metrics.get('model_used', '-')}")
         st.caption(f"**Tokens entrada:** {metrics.get('tokens_input', '-')}")

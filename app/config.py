@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":
