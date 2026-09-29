@@ -7,10 +7,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
     LLM_PROVIDER: str = "openai"
-    LLM_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    ANTHROPIC_MODEL: str = "claude-haiku-4-5"
+    LLM_MAX_RETRIES: int = 1
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"
+    API_BASE_URL: str = "http://localhost:8000"
 
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":
@@ -37,6 +40,8 @@ def get_settings() -> Settings:
 MODEL_PRICING_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gpt-4o": {"input": 2.50, "output": 10.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
 }
 
 

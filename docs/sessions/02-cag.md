@@ -1,7 +1,7 @@
 # Session 02 - CAG
 
 
-## Funcionalidad incremental
+## Funcionalidad
 
 Estructura base del Proyecto 1: una aplicación FastAPI con un endpoint que reciba el texto de una transcripción de reunión y devuelva una estimación de software generada por un LLM, utilizando arquitectura CAG (contexto estático inyectado en el prompt).
 
@@ -17,7 +17,7 @@ Servicio funcional que:
 - pydantic: uso de ficheros de configuración (p.ej. para variables de entorno, API_KEY, etc.)
 - uv: gestor de paquetes y proyectos para Python de alto rendimiento y ultra rápido. Controla las dependencias, lanza la aplicación, etc. El comando “--reload” recarga el servidor si algún fichero cambia (muy útil para desarrollo)
 - FastAPI: define la aplicación, rutas, validaciones, dependencias, etc. Pero no escucha directamente en un puerto de red. Para eso necesita un servidor ASGI como Uvicorn.
-- Uvicorn: servidor web ASGI
+- Uvicorn: servidor web ASGI para servir el endpoint de FastAPI
 
 
 ## Cómo invocar
@@ -31,3 +31,5 @@ curl -X POST <http://localhost:8000/api/v1/estimate> \\
   -d '{
     "transcription": "En la reunión con el equipo de marketing, el cliente explicó que necesita una landing page con formulario de contacto, integración con su CRM actual (HubSpot), y una sección de blog con editor WYSIWYG. El plazo ideal sería tenerlo listo en 4 semanas. El diseño ya existe en Figma."
   }'
+
+También se puede usar el Swagger en http://127.0.0.1:8000/docs para enviar una petición de prueba

@@ -1,12 +1,32 @@
+import json
 import time
 
+import httpx
 import streamlit as st
 
+from app.config import get_settings
 from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
 from app.logging_config import configure_logging
-from app.services.llm_service import build_system_prompt, estimate_project, estimate_project_stream
+from app.services.llm_service import build_system_prompt
 
 configure_logging()
+
+
+def stream_estimation_via_api(transcription: str, stats: dict):
+    url = f"{get_settings().API_BASE_URL}/api/v1/estimate/stream"
+    current_event = None
+
+    with httpx.stream("POST", url, json={"transcription": transcription}, timeout=60) as response:
+        for line in response.iter_lines():
+            if line.startswith("event:"):
+                current_event = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                payload = json.loads(line.split(":", 1)[1].strip())
+                if current_event == "token":
+                    yield payload["content"]
+                elif current_event == "metrics":
+                    stats.update(payload)
+                current_event = None
 
 st.title("Estimador de Proyectos - Chat")
 
@@ -43,7 +63,7 @@ if transcription:
     stats: dict = {}
     with st.chat_message("assistant"):
         start = time.perf_counter()
-        estimation = st.write_stream(estimate_project_stream(transcription, stats))
+        estimation = st.write_stream(stream_estimation_via_api(transcription, stats))
         stats["elapsed_seconds"] = time.perf_counter() - start
 
     st.session_state.messages.append({"role": "assistant", "content": estimation})
