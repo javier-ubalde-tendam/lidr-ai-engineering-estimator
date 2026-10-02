@@ -13,10 +13,12 @@ router = APIRouter(tags=["estimations"])
 @router.post("/estimate", response_model=EstimationResponse)
 def create_estimation(request: EstimationRequest) -> EstimationResponse:
     settings = get_settings()
-    estimation, tokens_input, tokens_output = estimate_project(request.transcription)
+    # Por ahora solo usamos description; project_type/detail_level/output_format se usarán con los templates Jinja2
+    estimation, tokens_input, tokens_output, model = estimate_project(request.description)
     return EstimationResponse(
         estimation=estimation,
-        model=settings.LLM_MODEL,
+        prompt_version="v0",  # Valor fijo hasta que existan los prompts versionados
+        model=model,
         provider=settings.LLM_PROVIDER,
         tokens_input=tokens_input,
         tokens_output=tokens_output,
@@ -32,7 +34,7 @@ def create_estimation_stream(request: EstimationRequest) -> StreamingResponse:
     stats: dict = {}
 
     def event_generator():
-        for chunk in estimate_project_stream(request.transcription, stats):
+        for chunk in estimate_project_stream(request.description, stats):
             yield _format_sse("token", {"content": chunk})
         yield _format_sse("metrics", stats)
 

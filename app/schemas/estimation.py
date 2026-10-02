@@ -1,10 +1,31 @@
+from enum import Enum
 from pydantic import BaseModel, Field
 
+class ProjectType(str, Enum):
+    MOBILE_APP = "mobile_app"
+    WEB_SAAS = "web_saas"
+    INTERNAL_TOOL = "internal_tool"
+    DATA_PIPELINE = "data_pipeline"
+
+class DetailLevel(str, Enum):
+    SUMMARY = "summary"
+    MEDIUM = "medium"
+    DETAILED = "detailed"
+
+class OutputFormat(str, Enum):
+    PHASES_TABLE = "phases_table"
+    LINE_ITEMS = "line_items"
+    NARRATIVE = "narrative"
+
 class EstimationRequest(BaseModel):
-    transcription: str = Field(..., min_length=50, description="The transcription of the meeting")
+    description: str = Field(min_length=20, max_length=2000)
+    project_type: ProjectType
+    detail_level: DetailLevel
+    output_format: OutputFormat
 
 class EstimationResponse(BaseModel):
     estimation: str = Field(..., description="The generated estimation")
+    prompt_version: str
     model: str = Field(..., description="The model used for estimation")
     provider: str = Field(..., description="The provider of the model")
     tokens_input: int = Field(..., description="The number of input tokens")

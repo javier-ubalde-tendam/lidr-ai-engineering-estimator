@@ -18,14 +18,14 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":
         if self.LLM_PROVIDER == "openai":
-            if not self.OPENAI_API_KEY or not self.OPENAI_API_KEY.startswith("sk-proj"):
+            if not self.OPENAI_API_KEY:
                 raise ValueError(
-                    "OPENAI_API_KEY debe estar seteada y empezar por 'sk-proj' cuando LLM_PROVIDER=openai"
+                    "OPENAI_API_KEY debe estar seteada cuando LLM_PROVIDER=openai"
                 )
         elif self.LLM_PROVIDER == "anthropic":
-            if not self.ANTHROPIC_API_KEY or not self.ANTHROPIC_API_KEY.startswith("sk-ant"):
+            if not self.ANTHROPIC_API_KEY:
                 raise ValueError(
-                    "ANTHROPIC_API_KEY debe estar seteada y empezar por 'sk-ant' cuando LLM_PROVIDER=anthropic"
+                    "ANTHROPIC_API_KEY debe estar seteada cuando LLM_PROVIDER=anthropic"
                 )
         else:
             raise ValueError(f"LLM_PROVIDER no soportado: {self.LLM_PROVIDER}")
@@ -36,7 +36,7 @@ def get_settings() -> Settings:
     return Settings()
 
 # Precios aproximados en USD por cada 1M de tokens. Referencia: pricing pages de OpenAI/Anthropic.
-# Ojo: cambian con el tiempo, revisar periódicamente. Clave = alias de modelo (settings.LLM_MODEL).
+# Ojo: cambian con el tiempo, revisar periódicamente
 MODEL_PRICING_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gpt-4o": {"input": 2.50, "output": 10.00},

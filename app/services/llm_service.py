@@ -100,7 +100,7 @@ def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
         finish_reason=response.choices[0].finish_reason,
     )
 
-    return (response.choices[0].message.content, tokens_input, tokens_output)
+    return (response.choices[0].message.content, tokens_input, tokens_output, _bare_model_name(model))
 
 # Versión con streaming, para la UI de Streamlit. Es un generador (yield en vez de return): la función no ejecuta nada hasta que alguien empieza a iterarla
 def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:

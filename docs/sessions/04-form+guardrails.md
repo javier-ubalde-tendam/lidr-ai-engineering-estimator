@@ -30,3 +30,5 @@ Se añade:
 
 ## Cómo invocar
 
+### Lanzar tests unitarios
+uv run pytest -v
