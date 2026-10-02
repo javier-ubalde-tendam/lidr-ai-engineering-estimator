@@ -9,6 +9,8 @@ from app.services.llm_service import estimate_project, estimate_project_stream
 
 router = APIRouter(tags=["estimations"])
 
+PROMPT_VERSION = "v0"  # Valor fijo hasta que existan los prompts versionados
+
 
 @router.post("/estimate", response_model=EstimationResponse)
 def create_estimation(request: EstimationRequest) -> EstimationResponse:
@@ -17,7 +19,7 @@ def create_estimation(request: EstimationRequest) -> EstimationResponse:
     estimation, tokens_input, tokens_output, model = estimate_project(request.description)
     return EstimationResponse(
         estimation=estimation,
-        prompt_version="v0",  # Valor fijo hasta que existan los prompts versionados
+        prompt_version=PROMPT_VERSION,
         model=model,
         provider=settings.LLM_PROVIDER,
         tokens_input=tokens_input,
@@ -36,7 +38,7 @@ def create_estimation_stream(request: EstimationRequest) -> StreamingResponse:
     def event_generator():
         for chunk in estimate_project_stream(request.description, stats):
             yield _format_sse("token", {"content": chunk})
-        yield _format_sse("metrics", stats)
+        yield _format_sse("metrics", {**stats, "prompt_version": PROMPT_VERSION})
 
     return StreamingResponse(
         event_generator(),

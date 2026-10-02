@@ -40,3 +40,17 @@ def test_estimate_rejects_short_description_without_calling_llm(monkeypatch):
     response = client.post("/api/v1/estimate", json={**VALID_BODY, "description": "corta"})
     assert response.status_code == 422
     assert calls == []
+
+
+def test_estimate_stream_emits_token_and_metrics_events(monkeypatch):
+    def fake_stream(description, stats):
+        stats["cache_hit"] = False
+        yield "Hola "
+        yield "mundo"
+
+    monkeypatch.setattr("app.routers.estimations.estimate_project_stream", fake_stream)
+    response = client.post("/api/v1/estimate/stream", json=VALID_BODY)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.count("event: token") == 2
+    assert 'event: metrics\ndata: {"cache_hit": false, "prompt_version": "v0"}' in response.text

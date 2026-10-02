@@ -29,13 +29,13 @@ def estimate_via_api(request: EstimationRequest) -> EstimationResponse:
     # model_validate comprueba que el JSON recibido cumple el contrato de la response
     return EstimationResponse.model_validate(response.json())
 
-# POR EL MOMENTO AL METER EL FORMULARIO TIPADO, EL STREAMING NO SE USA EN LA INTERFAZ DE STREAMLIT
 def stream_estimation_via_api(request: EstimationRequest, stats: dict):
     url = f"{get_settings().API_BASE_URL}/api/v1/estimate/stream"
     current_event = None
 
     # mode="json" convierte los Enum a sus valores (str); sin él httpx no podría serializarlos
     with httpx.stream("POST", url, json=request.model_dump(mode="json"), timeout=60) as response:
+        response.raise_for_status()  # sin esto, un 4xx/5xx acaba en una respuesta vacía sin error
         for line in response.iter_lines():
             if line.startswith("event:"):
                 current_event = line.split(":", 1)[1].strip()
@@ -92,34 +92,30 @@ if submitted:
         for err in exc.errors():
             st.error(f"{err['loc'][0]}: {err['msg']}")
     else:
+        stats: dict = {}  # el generador lo rellena al recibir el evento "metrics"
         try:
             start = time.perf_counter()
-            with st.spinner("Generando estimación..."):
-                result = estimate_via_api(request)
+            # write_stream consume el generador y pinta cada trozo según llega
+            st.write_stream(stream_estimation_via_api(request, stats))
             elapsed = time.perf_counter() - start   # incluye la latencia HTTP, no solo la del LLM
         except httpx.HTTPError as exc:
             st.error(f"Error al llamar al servicio IA: {exc}")
         else:
-            # exclude evita guardar el texto largo de la estimación en session_state
             # {**d, "k": v} copia el dict y añade una clave (como un putAll de Map en Java)
-            st.session_state.last_metrics = {
-                **result.model_dump(exclude={"estimation"}),
-                "elapsed_seconds": elapsed,
-            }
-            st.markdown(result.estimation)
-            st.caption(f"{result.provider} / {result.model} · prompt {result.prompt_version}")
+            st.session_state.last_metrics = {**stats, "elapsed_seconds": elapsed}
 
 # Segundo bloque de sidebar: se ejecuta después de calcular las métricas de esta consulta
 with st.sidebar:
     st.subheader("Última llamada")
     metrics = st.session_state.get("last_metrics")
     if metrics:
-        st.caption(f"**Cache hit:** {metrics.get('cache_hit', False)}")
-        st.caption(f"**Proveedor:** {metrics['provider']}")
-        st.caption(f"**Modelo:** {metrics['model']}")
+        st.caption(f"**Cache hit:** {metrics['cache_hit']}")
+        # En cache hit el servidor no llama al LLM: no hay proveedor, modelo ni tokens
+        st.caption(f"**Proveedor:** {metrics.get('provider_used', '-')}")
+        st.caption(f"**Modelo:** {metrics.get('model_used', '-')}")
         st.caption(f"**Versión del prompt:** {metrics['prompt_version']}")
-        st.caption(f"**Tokens entrada:** {metrics['tokens_input']}")
-        st.caption(f"**Tokens salida:** {metrics['tokens_output']}")
+        st.caption(f"**Tokens entrada:** {metrics.get('tokens_input', '-')}")
+        st.caption(f"**Tokens salida:** {metrics.get('tokens_output', '-')}")
         st.caption(f"**Tiempo:** {metrics['elapsed_seconds']:.2f} s")
     else:
         st.caption("Todavía no se ha generado ninguna estimación.")
