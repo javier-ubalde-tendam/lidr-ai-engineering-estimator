@@ -11,6 +11,24 @@ Servicio funcional que:
 - Envía la petición a un LLM (OpenAI o Anthropic)
 - Devuelve la estimación generada como respuesta JSON
 
+Estructura:
+- routers/ gestiona los endpoints HTTP
+    - crea un endpoint POST /api/v1/estimate
+    - recibe un body JSON + llame al services
+    - devuelva la estimación
+- services/ contiene la lógica de negocio (llamada al LLM)
+    - Construye el system prompt 
+    - Inyecta los ejemplos de contexto
+    - Envía la transcripción del usuario
+    - Devuelve la respuesta del modelo LLM
+- context/ almacena los datos estáticos que inyectamos en el prompt.
+- schemas/ define y valida los datos de entrada y salida
+- .env tiene las variables de entorno y las API Keys. Esto no se sube al repo pero incluimos un fichero .env.- example con la estructura esperada
+- main.py configura la aplicación FastAPI
+    - Incluye el router de estimaciones con el prefijo /api/v1
+    - Añade un endpoint GET /health
+    - Configura título y descripción para la docu automática (Swagger)
+
 
 ## Tecnologías
 
