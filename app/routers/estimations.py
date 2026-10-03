@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
+from app.dependencies import get_openai_client
+from app.guardrails.input import InputGuardrailViolation, check_input
 from app.schemas.estimation import EstimationRequest, EstimationResponse
 from app.services.llm_service import (
     EstimationFailedError,
@@ -14,11 +16,17 @@ from app.services.llm_service import (
 router = APIRouter(tags=["estimations"])
 
 
+def _guardrail_violation_detail(exc: InputGuardrailViolation) -> dict:
+    return {"reason": exc.reason, "message": exc.message}
+
+
 @router.post("/estimate", response_model=EstimationResponse)
 def create_estimation(request: EstimationRequest) -> EstimationResponse:
     settings = get_settings()
     try:
         result, *_ = estimate_project(request)
+    except InputGuardrailViolation as exc:
+        raise HTTPException(status_code=400, detail=_guardrail_violation_detail(exc)) from exc
     except EstimationFailedError as exc:
         # 502: el fallo es del proveedor LLM; el detalle interno no se expone al cliente
         raise HTTPException(status_code=502, detail="The LLM did not return a valid estimation") from exc
@@ -31,6 +39,13 @@ def _format_sse(event: str, payload: dict) -> str:
 
 @router.post("/estimate/stream")
 def create_estimation_stream(request: EstimationRequest) -> StreamingResponse:
+    # Se valida aquí (fuera del generador) para poder devolver un 400 real: una vez que
+    # StreamingResponse empieza a iterar, las cabeceras (200) ya se enviaron y no se pueden cambiar
+    try:
+        check_input(request.description, openai_client=get_openai_client())
+    except InputGuardrailViolation as exc:
+        raise HTTPException(status_code=400, detail=_guardrail_violation_detail(exc)) from exc
+
     stats: dict = {}
     prompt_version = get_settings().PROMPT_VERSION
 

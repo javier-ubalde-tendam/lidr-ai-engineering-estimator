@@ -1,4 +1,6 @@
 import time
+from collections.abc import Iterator
+from typing import Any, Literal
 
 import instructor
 import litellm
@@ -9,11 +11,12 @@ from pydantic import ValidationError
 
 from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
 from app.config import estimate_cost_usd, get_settings
+from app.dependencies import get_openai_client
+from app.guardrails.input import check_input
+from app.guardrails.output import enforce_scope_response
 from app.logging_config import TRACE
 from app.prompts.loader import render_estimation_prompt
 from app.schemas.estimation import EstimationRequest, EstimationResult
-from collections.abc import Iterator
-from typing import Any, Literal
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -75,6 +78,8 @@ def _totals_warnings(result: EstimationResult) -> list[str]:
 
 # Endpoint de FastAPI sin streaming
 def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int, int, str]:
+    # Nunca se llama al LLM con un input que no ha pasado los guardrails
+    check_input(request.description, openai_client=get_openai_client())
     system_prompt, user_prompt = render_estimation_prompt(request)
     model = _model_name_for_provider(settings.LLM_PROVIDER)
     tokens_input_estimated = len(system_prompt + user_prompt) // 4
@@ -111,6 +116,7 @@ def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int,
         raise EstimationFailedError("No valid estimation after retries") from exc
 
     _totals_warnings(result)  # sin reintento por totales: solo queda registrado en el log
+    result = enforce_scope_response(result)  # red de seguridad si el model_validator no disparó
     latency_ms = (time.perf_counter() - start) * 1000
     usage = completion.usage  # con reintentos Instructor acumula los tokens de todos los intentos
     tokens_output = usage.completion_tokens if usage else 0
@@ -267,6 +273,8 @@ def _log_llm_call_completed(stats: dict, start: float) -> None:
 
 
 def estimate_project_stream_structured(request: EstimationRequest, stats: dict) -> Iterator[StreamEvent]:
+    # Igual que en la versión bloqueante: el guardrail de input nunca se salta por cache ni por streaming
+    check_input(request.description, openai_client=get_openai_client())
     system_prompt, user_prompt = render_estimation_prompt(request)
     cache_key = build_cache_key(system_prompt, user_prompt)
     cached_result = _get_cached_result(cache_key)

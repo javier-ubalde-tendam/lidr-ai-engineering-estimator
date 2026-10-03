@@ -13,6 +13,7 @@ from litellm.types.utils import (
 )
 
 from app.cache import build_cache_key
+from app.guardrails.input import InputGuardrailViolation
 from app.prompts.loader import render_estimation_prompt
 from app.schemas.estimation import EstimationRequest, EstimationResult
 from app.services import llm_service
@@ -21,6 +22,13 @@ from app.services.llm_service import (
     estimate_project,
     estimate_project_stream_structured,
 )
+
+
+@pytest.fixture(autouse=True)
+def bypass_input_guardrail(monkeypatch):
+    # El guardrail de input se prueba aparte (tests/test_guardrails_input.py); aquí se neutraliza
+    # para que estos tests no dependan de la Moderation API real
+    monkeypatch.setattr(llm_service, "check_input", lambda *args, **kwargs: None)
 
 GOOD = {
     "summary": "Web platform with billing and reporting.",
@@ -130,6 +138,30 @@ def test_provider_errors_are_wrapped_and_not_retried(monkeypatch):
         estimate_project(REQUEST)
 
     assert len(calls) == 1
+
+
+def test_estimate_project_never_calls_the_llm_when_the_input_guardrail_fails(monkeypatch):
+    calls = use_fake_llm(monkeypatch, [GOOD])
+
+    def failing_check_input(description, *, openai_client=None):
+        raise InputGuardrailViolation(reason="pii", message="blocked")
+
+    monkeypatch.setattr(llm_service, "check_input", failing_check_input)
+
+    with pytest.raises(InputGuardrailViolation):
+        estimate_project(REQUEST)
+
+    assert calls == []
+
+
+def test_estimate_project_runs_the_output_scope_guardrail(monkeypatch):
+    use_fake_llm(monkeypatch, [GOOD])
+    received = []
+    monkeypatch.setattr(llm_service, "enforce_scope_response", lambda result: received.append(result) or result)
+
+    result, *_ = estimate_project(REQUEST)
+
+    assert received == [result]
 
 
 # --- Streaming estructurado ---

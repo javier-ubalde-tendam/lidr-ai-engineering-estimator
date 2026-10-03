@@ -35,6 +35,10 @@ def stream_estimation_via_api(request: EstimationRequest, stats: dict):
 
     # mode="json" convierte los Enum a sus valores (str); sin él httpx no podría serializarlos
     with httpx.stream("POST", url, json=request.model_dump(mode="json"), timeout=60) as response:
+        if response.is_error:
+            # Con streaming el body no se descarga solo: hay que leerlo aquí, antes de que
+            # raise_for_status() lance y el `with` cierre la conexión (si no, .json() falla luego)
+            response.read()
         response.raise_for_status()  # sin esto, un 4xx/5xx acaba en una respuesta vacía sin error
         for line in response.iter_lines():
             if line.startswith("event:"):
@@ -116,6 +120,13 @@ if submitted:
                 elif event == "error":
                     error = payload["detail"]
             elapsed = time.perf_counter() - start   # incluye la latencia HTTP, no solo la del LLM
+        except httpx.HTTPStatusError as exc:
+            # El 400 de los guardrails de input viaja como {"reason", "message"}; el 502 del LLM, como string
+            detail = exc.response.json().get("detail")
+            if isinstance(detail, dict) and "reason" in detail:
+                st.error(f"Entrada bloqueada ({detail['reason']}): {detail['message']}")
+            else:
+                st.error(f"Error al llamar al servicio IA: {detail or exc}")
         except httpx.HTTPError as exc:
             st.error(f"Error al llamar al servicio IA: {exc}")
         else:
