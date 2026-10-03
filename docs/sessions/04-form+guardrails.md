@@ -3,9 +3,13 @@
 ## Funcionalidad incremental
 
 Se añade:
-- Formulario + EstimationRequest tipado (Pydantic)
-- Templates Jinja2 versionados (v1/system.j2, user.j2, examples.j2) + loader + tests
-- EstimationResult + Instructor para salida estructurada
+- Formulario (en vez de chat) en la aplicación Streamlit + Schema en la petición (Pydantic)
+- Prompts mediante templates Jinja2 versionados (v1/system.j2, user.j2, examples.j2) + loader + tests
+     - system.j2   : rol del modelo, instrucciones generales, cómo formatear la salida
+     - user.j2     : el bloque que envuelve la descripción del proyecto del usuario
+     - examples.j2 : dos o tres ejemplos few-shot de estimaciones bien formadas
+     - loader      : resuelve versión y renderiza
+- JSON estructurado en la salida del LLM: EstimationResult + Instructor para salida estructurada
 - Guardrails: input (moderation + injection), scope en prompt, validators de output, política de fallo declarada por guardrail
 - Cache semántico con Redis/redisvl, bucket + embedding, solo tras guardrails, log-only primero
 
@@ -32,3 +36,12 @@ Se añade:
 
 ### Lanzar tests unitarios
 uv run pytest -v
+
+### Levantar docker redis (docker)
+docker run -d --name lidr-redis -p 6379:6379 redis:7-alpine
+
+### Levantar uvicorn (servidor web) para uso de FastAPI
+uv run uvicorn app.main:app --reload
+
+### Arrancar la aplicación streamlit (portal web con interfaz conversacional)
+streamlit run streamlit_app.py

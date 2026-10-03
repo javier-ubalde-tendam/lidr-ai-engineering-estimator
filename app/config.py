@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_MODEL: str = "claude-haiku-4-5"
     LLM_MAX_RETRIES: int = 1
+    PROMPT_VERSION: str = "v1"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"

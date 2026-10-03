@@ -7,8 +7,9 @@ from litellm import APIError, AuthenticationError, RateLimitError, Timeout
 
 from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
 from app.config import estimate_cost_usd, get_settings
-from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
 from app.logging_config import TRACE
+from app.prompts.loader import render_estimation_prompt
+from app.schemas.estimation import EstimationRequest
 from collections.abc import Iterator
 
 settings = get_settings()
@@ -34,34 +35,25 @@ def _bare_model_name(model: str) -> str:
     return model.removeprefix("anthropic/")
 
 
-def build_system_prompt() -> str:
-    examples_block = format_examples_for_prompt(ESTIMATION_EXAMPLES)
-    return (
-        "You are a senior technical project estimator with 10 years of experience "
-        "scoping software projects for a development agency. Given a meeting "
-        "summary describing a client's requirements, you produce a detailed, "
-        "realistic project estimation.\n\n"
-        "Your response must always follow this exact structure, in Markdown:\n"
-        "- A title with the project name\n"
-        "- A '### Task Breakdown' section with a table (Task | Hours | Cost (EUR))\n"
-        "- A '### Totals' section with total hours and total cost\n"
-        "- A '### Recommended Team' section\n"
-        "- A '### Estimated Duration' section\n\n"
-        "Use the following past estimations as reference for tone, granularity, "
-        "and pricing (assume a blended rate of ~62.5 EUR/hour unless the "
-        "complexity clearly justifies otherwise):\n\n"
-        f"{examples_block}"
-    )
+def _shorten(text: str, max_chars: int = 25) -> str:
+    # Solo añade "..." si realmente se recorta, para no sugerir texto omitido que no existe
+    return text if len(text) <= max_chars else f"{text[:max_chars]}..."
+
 
 # Endpoint de FastAPI sin streaming
-def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
+def estimate_project(request: EstimationRequest) -> tuple[str, int, int, str]:
+    system_prompt, user_prompt = render_estimation_prompt(request)
     model = _model_name_for_provider(settings.LLM_PROVIDER)
-    tokens_input_estimated = len(meeting_summary) // 4
+    tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
         "llm_call_started",
         model_requested=model,
         provider=settings.LLM_PROVIDER,
         tokens_input_estimated=tokens_input_estimated,
+        detail_level=request.detail_level,
+        output_format=request.output_format,
+        description=_shorten(request.description),
+        prompt_version=settings.PROMPT_VERSION,
     )
 
     start = time.perf_counter()
@@ -70,8 +62,8 @@ def estimate_project(meeting_summary: str) -> tuple[str, int, int]:
             model=model,
             api_key=_api_key_for_provider(settings.LLM_PROVIDER),
             messages=[
-                {"role": "system", "content": build_system_prompt()},
-                {"role": "user", "content": meeting_summary},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
         )
     except AuthenticationError as exc:
@@ -109,14 +101,14 @@ def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:
         yield text[i : i + chunk_size]
         time.sleep(0.01)
 
-def _call_llm_stream(provider: str, system_prompt: str, meeting_summary: str, stats: dict) -> Iterator[str]:
+def _call_llm_stream(provider: str, system_prompt: str, user_prompt: str, stats: dict) -> Iterator[str]:
     model = _model_name_for_provider(provider)
     response = litellm.completion(
         model=model,
         api_key=_api_key_for_provider(provider),
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": meeting_summary},
+            {"role": "user", "content": user_prompt},
         ],
         stream=True,
         stream_options={"include_usage": True},
@@ -172,18 +164,22 @@ def _consume_and_cache(stream: Iterator[str], stats: dict, cache_key: str, start
     _log_llm_call_completed(stats, start)
 
 
-def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
-    system_prompt = build_system_prompt()
-    cache_key = build_cache_key(meeting_summary, system_prompt)
+def estimate_project_stream(request: EstimationRequest, stats: dict) -> Iterator[str]:
+    system_prompt, user_prompt = render_estimation_prompt(request)
+    cache_key = build_cache_key(system_prompt, user_prompt)
     cached_estimation = get_cached_estimation(cache_key)
     cache_hit = cached_estimation is not None
 
-    tokens_input_estimated = len(meeting_summary) // 4
+    tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
         "llm_call_started",
         provider_requested=settings.LLM_PROVIDER,
         tokens_input_estimated=tokens_input_estimated,
         cache_hit=cache_hit,
+        detail_level=request.detail_level,
+        output_format=request.output_format,
+        description=_shorten(request.description),
+        prompt_version=settings.PROMPT_VERSION,
     )
 
     start = time.perf_counter()
@@ -206,7 +202,7 @@ def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
 
     for attempt in range(settings.LLM_MAX_RETRIES + 1):
         try:
-            stream = _call_llm_stream(primary_provider, system_prompt, meeting_summary, stats)
+            stream = _call_llm_stream(primary_provider, system_prompt, user_prompt, stats)
             first_chunk = next(stream)
         except AuthenticationError as exc:
             logger.warning(
@@ -228,7 +224,7 @@ def estimate_project_stream(meeting_summary: str, stats: dict) -> Iterator[str]:
             return
 
     try:
-        stream = _call_llm_stream(fallback_provider, system_prompt, meeting_summary, stats)
+        stream = _call_llm_stream(fallback_provider, system_prompt, user_prompt, stats)
         first_chunk = next(stream)
     except (AuthenticationError, RateLimitError, Timeout, APIError, StopIteration) as exc:
         logger.error("llm_call_failed", error_type="all_providers_failed", error=str(exc))

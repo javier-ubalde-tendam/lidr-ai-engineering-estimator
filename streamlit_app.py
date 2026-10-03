@@ -7,9 +7,8 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.context.examples import ESTIMATION_EXAMPLES, format_examples_for_prompt
 from app.logging_config import configure_logging
-from app.services.llm_service import build_system_prompt
+from app.prompts.loader import render_estimation_prompt
 
 from app.schemas.estimation import (
     DetailLevel,
@@ -48,17 +47,6 @@ def stream_estimation_via_api(request: EstimationRequest, stats: dict):
                 current_event = None
 
 st.title("IA Estimator - Formulario tipado")
-
-# Panel lateral
-with st.sidebar:
-    st.header("Contexto del LLM")
-
-    with st.expander("System prompt"):
-        st.text(build_system_prompt())
-
-    with st.expander("Ejemplos inyectados (CAG)"):
-        st.text(format_examples_for_prompt(ESTIMATION_EXAMPLES))
-
 
 with st.form("estimation_form"):
     description = st.text_area("Descripción del proyecto", height=200)
@@ -103,9 +91,21 @@ if submitted:
         else:
             # {**d, "k": v} copia el dict y añade una clave (como un putAll de Map en Java)
             st.session_state.last_metrics = {**stats, "elapsed_seconds": elapsed}
+            st.session_state.last_prompts = render_estimation_prompt(request, stats["prompt_version"])
 
-# Segundo bloque de sidebar: se ejecuta después de calcular las métricas de esta consulta
+# Panel lateral: se pinta después del formulario para ver los datos de esta misma ejecución
 with st.sidebar:
+    st.header("Contexto del LLM")
+    prompts = st.session_state.get("last_prompts")
+    if prompts:
+        system_prompt, user_prompt = prompts
+        with st.expander("System prompt"):
+            st.text(system_prompt)
+        with st.expander("User prompt"):
+            st.text(user_prompt)
+    else:
+        st.caption("Se mostrará tras la primera estimación.")
+
     st.subheader("Última llamada")
     metrics = st.session_state.get("last_metrics")
     if metrics:

@@ -16,13 +16,13 @@ def test_estimate_returns_response_contract(monkeypatch):
     # porque "from x import f" copia la referencia al módulo que importa
     monkeypatch.setattr(
         "app.routers.estimations.estimate_project",
-        lambda description: ("# Estimación", 100, 200, "gpt-4o-mini"),
+        lambda request: ("# Estimación", 100, 200, "gpt-4o-mini"),
     )
     response = client.post("/api/v1/estimate", json=VALID_BODY)
     assert response.status_code == 200
     assert response.json() == {
         "estimation": "# Estimación",
-        "prompt_version": "v0",
+        "prompt_version": "v1",
         "model": "gpt-4o-mini",
         "provider": "openai",  # fijado en conftest.py
         "tokens_input": 100,
@@ -30,12 +30,22 @@ def test_estimate_returns_response_contract(monkeypatch):
     }
 
 
+def test_estimate_reports_prompt_version_from_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.estimations.estimate_project",
+        lambda request: ("# Estimación", 1, 2, "gpt-4o-mini"),
+    )
+    monkeypatch.setenv("PROMPT_VERSION", "v7")
+    response = client.post("/api/v1/estimate", json=VALID_BODY)
+    assert response.json()["prompt_version"] == "v7"
+
+
 def test_estimate_rejects_short_description_without_calling_llm(monkeypatch):
     calls = []
     # La lista registra cada llamada: si el endpoint llegara al servicio, calls dejaría de estar vacía
     monkeypatch.setattr(
         "app.routers.estimations.estimate_project",
-        lambda description: calls.append(description),
+        lambda request: calls.append(request),
     )
     response = client.post("/api/v1/estimate", json={**VALID_BODY, "description": "corta"})
     assert response.status_code == 422
@@ -43,7 +53,7 @@ def test_estimate_rejects_short_description_without_calling_llm(monkeypatch):
 
 
 def test_estimate_stream_emits_token_and_metrics_events(monkeypatch):
-    def fake_stream(description, stats):
+    def fake_stream(request, stats):
         stats["cache_hit"] = False
         yield "Hola "
         yield "mundo"
@@ -53,4 +63,4 @@ def test_estimate_stream_emits_token_and_metrics_events(monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.text.count("event: token") == 2
-    assert 'event: metrics\ndata: {"cache_hit": false, "prompt_version": "v0"}' in response.text
+    assert 'event: metrics\ndata: {"cache_hit": false, "prompt_version": "v1"}' in response.text
