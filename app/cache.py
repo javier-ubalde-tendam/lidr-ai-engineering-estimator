@@ -14,7 +14,7 @@ CACHE_TTL_SECONDS = 3600
 
 def build_cache_key(system_prompt: str, user_prompt: str) -> str:
     # sha256 en vez de guardar el texto crudo como clave: tamaño fijo y evita problemas de encoding/longitud
-    # Ambos prompts ya incluyen project_type, detail_level y output_format: cualquier cambio invalida la clave
+    # Los prompts incluyen los campos del formulario que usa su versión: v2 ya no usa output_format (solo presentación)
     raw = f"{system_prompt}::{user_prompt}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return f"estimation:{digest}"

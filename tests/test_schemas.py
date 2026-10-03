@@ -33,7 +33,7 @@ def test_unknown_project_type_is_rejected():
 
 def test_description_too_long_is_rejected():
     with pytest.raises(ValidationError):
-        EstimationRequest(**{**VALID_FIELDS, "description": "x" * 2001})
+        EstimationRequest(**{**VALID_FIELDS, "description": "x" * 10001})
 
 
 def make_phase(**overrides) -> dict:
@@ -65,14 +65,16 @@ def test_valid_result_is_accepted():
     assert len(result.phases) == 2
 
 
-def test_total_cost_must_match_sum_of_phases():
-    with pytest.raises(ValidationError) as exc_info:
-        EstimationResult.model_validate(make_result(total_cost_eur=10500))
+def test_totals_mismatch_does_not_reject_the_result_but_is_reported():
+    result = EstimationResult.model_validate(make_result(total_cost_eur=10500))
 
-    # Este mensaje se reenvía al LLM en el reintento: debe incluir ambos importes
-    message = exc_info.value.errors()[0]["msg"]
-    assert "10500" in message
-    assert "10000" in message
+    message = result.totals_mismatch()
+
+    assert message == "total_cost_eur is 10500 but the phases sum to 10000"
+
+
+def test_totals_mismatch_is_none_when_totals_match():
+    assert EstimationResult.model_validate(make_result()).totals_mismatch() is None
 
 
 def test_low_confidence_without_out_of_scope_prefix_is_rejected():

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-haiku-4-5"
     LLM_MAX_RETRIES: int = 1
     STRUCTURED_OUTPUT_MAX_RETRIES: int = 2
-    PROMPT_VERSION: str = "v1"
+    PROMPT_VERSION: str = "v2"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"

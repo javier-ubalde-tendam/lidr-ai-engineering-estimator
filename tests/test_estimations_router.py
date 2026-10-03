@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -71,15 +73,56 @@ def test_estimate_rejects_short_description_without_calling_llm(monkeypatch):
     assert calls == []
 
 
-def test_estimate_stream_emits_token_and_metrics_events(monkeypatch):
+def parse_sse(text: str) -> list[tuple[str, dict]]:
+    # Cada evento SSE son dos líneas ("event: x" y "data: {...}") separadas del siguiente por una línea en blanco
+    events = []
+    for block in text.strip().split("\n\n"):
+        event_line, data_line = block.split("\n")
+        events.append((event_line.removeprefix("event: "), json.loads(data_line.removeprefix("data: "))))
+    return events
+
+
+# Lo que emite Instructor mientras el JSON está a medias: campos None aunque el tipo declarado sea int
+PARTIAL_RESULT = EstimationResult.model_construct(
+    summary="Mobile booking",
+    confidence_pct=None,
+    phases=[],
+    total_duration_weeks=None,
+    total_cost_eur=None,
+)
+
+
+def test_estimate_stream_emits_partial_complete_and_metrics_events(monkeypatch):
+    final = EstimationResult.model_validate(VALID_RESULT)
+
     def fake_stream(request, stats):
         stats["cache_hit"] = False
-        yield "Hola "
-        yield "mundo"
+        yield "partial", PARTIAL_RESULT
+        yield "partial", final
+        yield "complete", final
 
-    monkeypatch.setattr("app.routers.estimations.estimate_project_stream", fake_stream)
+    monkeypatch.setattr("app.routers.estimations.estimate_project_stream_structured", fake_stream)
     response = client.post("/api/v1/estimate/stream", json=VALID_BODY)
+
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text.count("event: token") == 2
-    assert 'event: metrics\ndata: {"cache_hit": false, "prompt_version": "v1"}' in response.text
+    events = parse_sse(response.text)
+    assert [name for name, _ in events] == ["partial", "partial", "complete", "metrics"]
+    assert events[0][1]["total_cost_eur"] is None  # el parcial viaja con campos a None
+    assert events[2][1] == VALID_RESULT  # mismo shape que EstimationResponse.result
+    assert events[3][1] == {"cache_hit": False, "prompt_version": "v1"}
+
+
+def test_estimate_stream_emits_error_event_when_the_final_validation_fails(monkeypatch):
+    def failing_stream(request, stats):
+        stats["cache_hit"] = False
+        yield "partial", PARTIAL_RESULT
+        raise EstimationFailedError("No valid estimation after retries")
+
+    monkeypatch.setattr("app.routers.estimations.estimate_project_stream_structured", failing_stream)
+    response = client.post("/api/v1/estimate/stream", json=VALID_BODY)
+
+    assert response.status_code == 200  # las cabeceras ya se enviaron: el fallo viaja como evento
+    events = parse_sse(response.text)
+    assert [name for name, _ in events] == ["partial", "error", "metrics"]
+    assert "No valid estimation" not in response.text  # no se filtra el detalle interno

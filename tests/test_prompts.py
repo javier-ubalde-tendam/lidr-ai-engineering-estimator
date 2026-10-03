@@ -1,8 +1,10 @@
+import re
+
 import pytest
 from jinja2 import TemplateNotFound
 
 from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import DetailLevel, EstimationRequest, OutputFormat, ProjectType
+from app.schemas.estimation import DetailLevel, EstimationRequest, EstimationResult, OutputFormat, ProjectType
 
 
 def make_request(**overrides) -> EstimationRequest:
@@ -85,3 +87,34 @@ def test_explicit_version_overrides_settings(monkeypatch):
     system, _ = render_estimation_prompt(make_request(), version="v1")
 
     assert "<examples>" in system
+
+
+def test_v2_prompt_ignores_output_format_because_it_only_affects_presentation():
+    renders = {
+        render_estimation_prompt(make_request(output_format=output_format), version="v2")
+        for output_format in OutputFormat
+    }
+
+    # Un solo prompt para los tres formatos: la caché se comparte y el LLM no recibe instrucciones de maquetación
+    assert len(renders) == 1
+    system, _ = renders.pop()
+    assert "Render a Markdown table" not in system
+
+
+def test_v2_detail_level_changes_the_text_budget_rules():
+    detailed, _ = render_estimation_prompt(make_request(detail_level=DetailLevel.DETAILED), version="v2")
+    summary, _ = render_estimation_prompt(make_request(detail_level=DetailLevel.SUMMARY), version="v2")
+
+    assert "at least three risks" in detailed
+    assert "at least three risks" not in summary
+
+
+def test_v2_examples_are_valid_estimation_results():
+    system, _ = render_estimation_prompt(make_request(), version="v2")
+
+    blocks = re.findall(r"<estimation>\n(.*?)\n</estimation>", system, flags=re.DOTALL)
+
+    # Si el schema cambia, los ejemplos del prompt dejan de ser válidos y este test lo avisa
+    assert len(blocks) == 4
+    for block in blocks:
+        EstimationResult.model_validate_json(block)

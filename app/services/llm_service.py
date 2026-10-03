@@ -1,4 +1,3 @@
-import itertools
 import time
 
 import instructor
@@ -14,6 +13,7 @@ from app.logging_config import TRACE
 from app.prompts.loader import render_estimation_prompt
 from app.schemas.estimation import EstimationRequest, EstimationResult
 from collections.abc import Iterator
+from typing import Any, Literal
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -65,6 +65,14 @@ def _error_type(error: BaseException | None) -> str:
     return "unknown"
 
 
+def _totals_warnings(result: EstimationResult) -> list[str]:
+    mismatch = result.totals_mismatch()
+    if mismatch is None:
+        return []
+    logger.warning("validation_not_passed", validation="totals_match_phases", detail=mismatch)
+    return [f"totals_match_phases: {mismatch}"]
+
+
 # Endpoint de FastAPI sin streaming
 def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int, int, str]:
     system_prompt, user_prompt = render_estimation_prompt(request)
@@ -102,6 +110,7 @@ def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int,
         )
         raise EstimationFailedError("No valid estimation after retries") from exc
 
+    _totals_warnings(result)  # sin reintento por totales: solo queda registrado en el log
     latency_ms = (time.perf_counter() - start) * 1000
     usage = completion.usage  # con reintentos Instructor acumula los tokens de todos los intentos
     tokens_output = usage.completion_tokens if usage else 0
@@ -124,19 +133,16 @@ def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:
         yield text[i : i + chunk_size]
         time.sleep(0.01)
 
-def _call_llm_stream(provider: str, system_prompt: str, user_prompt: str, stats: dict) -> Iterator[str]:
-    model = _model_name_for_provider(provider)
-    response = litellm.completion(
-        model=model,
-        api_key=_api_key_for_provider(provider),
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    for chunk in response:
+# "partial": estado provisional (campos None, números a medias); "complete": validado con los model_validator
+StreamEvent = tuple[Literal["partial", "complete"], EstimationResult]
+
+# Se crea una sola vez (cada Partial[...] cachea una clase nueva); Any porque los stubs ocultan model_from_chunks
+_PartialEstimationResult: Any = instructor.Partial[EstimationResult]
+_ESTIMATION_TOOL = instructor.openai_schema(EstimationResult).openai_schema
+
+
+def _tool_json_fragments(stream: Iterator[Any], provider: str, model: str, stats: dict) -> Iterator[str]:
+    for chunk in stream:
         # Comprobado con logs reales: chunk.model siempre es el nombre pedido, no un snapshot fechado
         # distinto (a diferencia de lo que asumíamos antes sin verificarlo). LiteLLM no expone aquí
         # el snapshot exacto resuelto por el proveedor.
@@ -144,9 +150,10 @@ def _call_llm_stream(provider: str, system_prompt: str, user_prompt: str, stats:
         stats["model_used"] = _bare_model_name(getattr(chunk, "model", model))
 
         if chunk.choices:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            # Con tool calling el JSON viaja en tool_calls[0].function.arguments, no en delta.content
+            tool_calls = chunk.choices[0].delta.tool_calls
+            if tool_calls and tool_calls[0].function.arguments:
+                yield tool_calls[0].function.arguments
             finish_reason = chunk.choices[0].finish_reason
             if finish_reason:
                 stats["finish_reason"] = finish_reason
@@ -158,6 +165,87 @@ def _call_llm_stream(provider: str, system_prompt: str, user_prompt: str, stats:
             stats["tokens_output"] = usage.completion_tokens
         # Nivel TRACE (por debajo de DEBUG): oculto salvo que bajes LOG_LEVEL por debajo de DEBUG
         logger.log(TRACE, "raw_chunk", provider=provider, chunk=repr(chunk))
+
+
+def _drain_on_error(fragments: Iterator[str], states: Iterator[EstimationResult]) -> Iterator[EstimationResult]:
+    try:
+        yield from states
+    except Exception:
+        # El chunk con usage llega después del último fragmento JSON: se consume para no perder los tokens
+        for _ in fragments:
+            pass
+        raise
+
+
+def _open_partial_stream(
+    provider: str, system_prompt: str, user_prompt: str, stats: dict
+) -> tuple[EstimationResult, Iterator[EstimationResult]]:
+    model = _model_name_for_provider(provider)
+    # create_partial de Instructor 1.17 consume el stream entero antes de devolver nada: se llama a LiteLLM directo
+    response = litellm.completion(
+        model=model,
+        api_key=_api_key_for_provider(provider),
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        tools=[{"type": "function", "function": _ESTIMATION_TOOL}],
+        tool_choice={"type": "function", "function": {"name": _ESTIMATION_TOOL["name"]}},
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    fragments = _tool_json_fragments(response, provider, model, stats)
+    states = _drain_on_error(fragments, _PartialEstimationResult.model_from_chunks(fragments))
+    # Pedir el primer estado fuerza la conexión: los fallos de proveedor saltan aquí, antes de emitir nada
+    return next(states), states
+
+
+def _open_stream_with_fallback(
+    system_prompt: str, user_prompt: str, stats: dict
+) -> tuple[EstimationResult, Iterator[EstimationResult]]:
+    primary_provider = settings.LLM_PROVIDER
+    for attempt in range(settings.LLM_MAX_RETRIES + 1):
+        try:
+            first_state, states = _open_partial_stream(primary_provider, system_prompt, user_prompt, stats)
+        except AuthenticationError as exc:
+            logger.warning(
+                "llm_call_attempt_failed", attempt="primary_auth", provider=primary_provider, error=str(exc)
+            )
+            break
+        except (RateLimitError, Timeout, APIError, StopIteration) as exc:
+            logger.warning(
+                "llm_call_attempt_failed",
+                attempt=f"primary_retry_{attempt}",
+                provider=primary_provider,
+                error=str(exc),
+            )
+            continue
+        stats["provider_used"] = primary_provider
+        stats["fallback_used"] = False
+        return first_state, states
+
+    fallback_provider = _other_provider(primary_provider)
+    try:
+        first_state, states = _open_partial_stream(fallback_provider, system_prompt, user_prompt, stats)
+    except (AuthenticationError, RateLimitError, Timeout, APIError, StopIteration) as exc:
+        logger.error("llm_call_failed", error_type="all_providers_failed", error=str(exc))
+        raise EstimationFailedError("All providers failed") from exc
+
+    stats["provider_used"] = fallback_provider
+    stats["fallback_used"] = True
+    return first_state, states
+
+
+def _get_cached_result(cache_key: str) -> EstimationResult | None:
+    cached = get_cached_estimation(cache_key)
+    if cached is None:
+        return None
+    try:
+        return EstimationResult.model_validate_json(cached)
+    except ValidationError:
+        # Entradas del streaming anterior (texto libre) o de otra versión del schema: se tratan como miss
+        logger.warning("cache_entry_invalid", cache_key=cache_key)
+        return None
 
 
 def _log_llm_call_completed(stats: dict, start: float) -> None:
@@ -178,20 +266,11 @@ def _log_llm_call_completed(stats: dict, start: float) -> None:
     )
 
 
-def _consume_and_cache(stream: Iterator[str], stats: dict, cache_key: str, start: float) -> Iterator[str]:
-    full_response_parts: list[str] = []
-    for chunk in stream:
-        full_response_parts.append(chunk)
-        yield chunk
-    set_cached_estimation(cache_key, "".join(full_response_parts))
-    _log_llm_call_completed(stats, start)
-
-
-def estimate_project_stream(request: EstimationRequest, stats: dict) -> Iterator[str]:
+def estimate_project_stream_structured(request: EstimationRequest, stats: dict) -> Iterator[StreamEvent]:
     system_prompt, user_prompt = render_estimation_prompt(request)
     cache_key = build_cache_key(system_prompt, user_prompt)
-    cached_estimation = get_cached_estimation(cache_key)
-    cache_hit = cached_estimation is not None
+    cached_result = _get_cached_result(cache_key)
+    cache_hit = cached_result is not None
 
     tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
@@ -208,8 +287,11 @@ def estimate_project_stream(request: EstimationRequest, stats: dict) -> Iterator
     start = time.perf_counter()
     stats["cache_hit"] = cache_hit
 
-    if cache_hit:
-        yield from _simulate_stream_chunks(cached_estimation)
+    if cached_result is not None:
+        # Mismo parser que con el LLM real: el cliente recibe los mismos estados parciales
+        replay = _PartialEstimationResult.model_from_chunks(_simulate_stream_chunks(cached_result.model_dump_json()))
+        for state in replay:
+            yield "partial", state
         logger.info(
             "llm_call_completed",
             tokens_input=0,
@@ -218,41 +300,37 @@ def estimate_project_stream(request: EstimationRequest, stats: dict) -> Iterator
             cost_usd=0.0,
             finish_reason="cache_hit",
         )
+        yield "complete", cached_result
         return
 
-    primary_provider = settings.LLM_PROVIDER
-    fallback_provider = _other_provider(primary_provider)
-
-    for attempt in range(settings.LLM_MAX_RETRIES + 1):
-        try:
-            stream = _call_llm_stream(primary_provider, system_prompt, user_prompt, stats)
-            first_chunk = next(stream)
-        except AuthenticationError as exc:
-            logger.warning(
-                "llm_call_attempt_failed", attempt="primary_auth", provider=primary_provider, error=str(exc)
-            )
-            break
-        except (RateLimitError, Timeout, APIError, StopIteration) as exc:
-            logger.warning(
-                "llm_call_attempt_failed",
-                attempt=f"primary_retry_{attempt}",
-                provider=primary_provider,
-                error=str(exc),
-            )
-            continue
-        else:
-            stats["provider_used"] = primary_provider
-            stats["fallback_used"] = False
-            yield from _consume_and_cache(itertools.chain([first_chunk], stream), stats, cache_key, start)
-            return
-
+    first_state, states = _open_stream_with_fallback(system_prompt, user_prompt, stats)
+    last_state = first_state
+    yield "partial", first_state
     try:
-        stream = _call_llm_stream(fallback_provider, system_prompt, user_prompt, stats)
-        first_chunk = next(stream)
-    except (AuthenticationError, RateLimitError, Timeout, APIError, StopIteration) as exc:
-        logger.error("llm_call_failed", error_type="all_providers_failed", error=str(exc))
-        raise RuntimeError("Todos los proveedores fallaron") from exc
+        for last_state in states:
+            yield "partial", last_state
+        # Instructor no valida un JSON truncado; model_dump() fuerza la revalidación (una instancia no se revalida)
+        result = EstimationResult.model_validate(last_state.model_dump())
+    except (ValueError, AuthenticationError, RateLimitError, Timeout, APIError) as exc:
+        # ValidationError (y los errores de JSON de jiter) heredan de ValueError
+        logger.warning(
+            "llm_call_attempt_failed",
+            attempt="stream_final_validation",
+            provider=stats["provider_used"],
+            error_type=_error_type(exc),
+            error=str(exc),
+        )
+        # Política de fallo: se descartan los parciales y se reintenta con Instructor bloqueante
+        stats["blocking_fallback_used"] = True
+        result, tokens_input, tokens_output, model = estimate_project(request)
+        stats["tokens_input"] = stats.get("tokens_input", 0) + tokens_input
+        stats["tokens_output"] = stats.get("tokens_output", 0) + tokens_output
+        stats["model_requested"] = model
 
-    stats["provider_used"] = fallback_provider
-    stats["fallback_used"] = True
-    yield from _consume_and_cache(itertools.chain([first_chunk], stream), stats, cache_key, start)
+    # Solo se cachea un resultado sin avisos, para poder reintentar y obtener uno mejor
+    if warnings := _totals_warnings(result):
+        stats["validation_warnings"] = warnings
+    else:
+        set_cached_estimation(cache_key, result.model_dump_json())
+    _log_llm_call_completed(stats, start)
+    yield "complete", result

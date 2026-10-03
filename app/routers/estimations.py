@@ -5,7 +5,11 @@ from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.schemas.estimation import EstimationRequest, EstimationResponse
-from app.services.llm_service import EstimationFailedError, estimate_project, estimate_project_stream
+from app.services.llm_service import (
+    EstimationFailedError,
+    estimate_project,
+    estimate_project_stream_structured,
+)
 
 router = APIRouter(tags=["estimations"])
 
@@ -31,8 +35,12 @@ def create_estimation_stream(request: EstimationRequest) -> StreamingResponse:
     prompt_version = get_settings().PROMPT_VERSION
 
     def event_generator():
-        for chunk in estimate_project_stream(request, stats):
-            yield _format_sse("token", {"content": chunk})
+        try:
+            for event, result in estimate_project_stream_structured(request, stats):
+                yield _format_sse(event, result.model_dump(mode="json"))
+        except EstimationFailedError:
+            # Ya se enviaron cabeceras 200: el fallo se comunica como evento, y sin exponer detalle interno
+            yield _format_sse("error", {"detail": "The LLM did not return a valid estimation"})
         yield _format_sse("metrics", {**stats, "prompt_version": prompt_version})
 
     return StreamingResponse(

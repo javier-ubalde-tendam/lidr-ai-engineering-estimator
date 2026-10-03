@@ -19,7 +19,7 @@ class OutputFormat(str, Enum):
     NARRATIVE = "narrative"
 
 class EstimationRequest(BaseModel):
-    description: str = Field(min_length=20, max_length=2000)
+    description: str = Field(min_length=20, max_length=10000)
     project_type: ProjectType
     detail_level: DetailLevel
     output_format: OutputFormat
@@ -44,18 +44,14 @@ class EstimationResult(BaseModel):
         ge=0, le=2_000_000, description="Exact sum of every phase.cost_eur"
     )
 
-    @model_validator(mode="after")  # corre con el objeto ya construido y puede cruzar campos
-    def totals_match_phases(self) -> "EstimationResult":
+    def totals_mismatch(self) -> str | None:
+        # Ya no es un validator: un desajuste no rechaza el resultado, se avisa al usuario
         phases_cost = sum(p.cost_eur for p in self.phases)
-        if self.total_cost_eur != phases_cost:
-            # Este mensaje se reenvía al LLM en el reintento: debe ser concreto
-            raise ValueError(
-                f"total_cost_eur is {self.total_cost_eur} but the phases sum to {phases_cost}; "
-                "it must equal the sum of every phase.cost_eur"
-            )
-        return self
+        if self.total_cost_eur == phases_cost:
+            return None
+        return f"total_cost_eur is {self.total_cost_eur} but the phases sum to {phases_cost}"
 
-    @model_validator(mode="after")
+    @model_validator(mode="after")  # corre con el objeto ya construido y puede cruzar campos
     def low_confidence_requires_out_of_scope_prefix(self) -> "EstimationResult":
         if self.confidence_pct < LOW_CONFIDENCE_THRESHOLD and not self.summary.startswith(
             OUT_OF_SCOPE_PREFIX

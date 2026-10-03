@@ -11,6 +11,7 @@ from app.logging_config import configure_logging
 from app.prompts.loader import render_estimation_prompt
 
 from app.schemas.estimation import (
+    OUT_OF_SCOPE_PREFIX,
     DetailLevel,
     EstimationRequest,
     EstimationResponse,
@@ -40,11 +41,33 @@ def stream_estimation_via_api(request: EstimationRequest, stats: dict):
                 current_event = line.split(":", 1)[1].strip()
             elif line.startswith("data:"):
                 payload = json.loads(line.split(":", 1)[1].strip())
-                if current_event == "token":
-                    yield payload["content"]
-                elif current_event == "metrics":
+                if current_event == "metrics":
                     stats.update(payload)
+                else:
+                    yield current_event, payload  # partial, complete o error
                 current_event = None
+
+def show_result(result: dict, output_format: OutputFormat) -> None:
+    if result["summary"].startswith(OUT_OF_SCOPE_PREFIX):
+        # La fase "Not estimated" es un relleno para cumplir el schema: no se muestra como estimación
+        st.warning(result["summary"])
+        return
+    st.markdown(result["summary"])
+    st.caption(f"Confianza: {result['confidence_pct']}%")
+    phases = result["phases"]
+    if output_format == OutputFormat.PHASES_TABLE:
+        st.dataframe(phases, hide_index=True)
+    elif output_format == OutputFormat.LINE_ITEMS:
+        st.markdown(
+            "\n".join(
+                f"{i}. **{p['name']}**: {p['duration_weeks']} semanas, {p['cost_eur']} €. {p['summary']}"
+                for i, p in enumerate(phases, start=1)
+            )
+        )
+    else:
+        for p in phases:
+            st.markdown(f"**{p['name']}** ({p['duration_weeks']} semanas, {p['cost_eur']} €). {p['summary']}")
+    st.write(f"**Total:** {result['total_cost_eur']} € en {result['total_duration_weeks']} semanas")
 
 st.title("IA Estimator - Formulario tipado")
 
@@ -81,20 +104,35 @@ if submitted:
             st.error(f"{err['loc'][0]}: {err['msg']}")
     else:
         stats: dict = {}  # el generador lo rellena al recibir el evento "metrics"
+        placeholder = st.empty()  # un único hueco que se reescribe con cada estado parcial
+        result, error = None, None
         try:
             start = time.perf_counter()
-            # write_stream consume el generador y pinta cada trozo según llega
-            st.write_stream(stream_estimation_via_api(request, stats))
+            for event, payload in stream_estimation_via_api(request, stats):
+                if event == "partial":
+                    placeholder.json(payload)  # provisional: campos a null y números a medias
+                elif event == "complete":
+                    result = payload
+                elif event == "error":
+                    error = payload["detail"]
             elapsed = time.perf_counter() - start   # incluye la latencia HTTP, no solo la del LLM
         except httpx.HTTPError as exc:
             st.error(f"Error al llamar al servicio IA: {exc}")
         else:
+            if result:
+                with placeholder.container():  # sustituye el JSON parcial por el resultado validado
+                    show_result(result, request.output_format)
+            else:
+                placeholder.error(error or "El servicio no devolvió ninguna estimación")
             # {**d, "k": v} copia el dict y añade una clave (como un putAll de Map en Java)
             st.session_state.last_metrics = {**stats, "elapsed_seconds": elapsed}
             st.session_state.last_prompts = render_estimation_prompt(request, stats["prompt_version"])
 
 # Panel lateral: se pinta después del formulario para ver los datos de esta misma ejecución
 with st.sidebar:
+    # Validaciones blandas: el resultado se muestra igualmente, pero el usuario debe saber que falló una
+    for warning in st.session_state.get("last_metrics", {}).get("validation_warnings", []):
+        st.error(f"Validación no superada: {warning}")
     st.header("Contexto del LLM")
     prompts = st.session_state.get("last_prompts")
     if prompts:
