@@ -1,19 +1,29 @@
 import itertools
 import time
 
+import instructor
 import litellm
 import structlog
+from instructor.core.exceptions import InstructorRetryException
 from litellm import APIError, AuthenticationError, RateLimitError, Timeout
+from pydantic import ValidationError
 
 from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
 from app.config import estimate_cost_usd, get_settings
 from app.logging_config import TRACE
 from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import EstimationRequest
+from app.schemas.estimation import EstimationRequest, EstimationResult
 from collections.abc import Iterator
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+# Envuelve litellm.completion: añade response_model y reintentos con el error de validación
+_structured_client = instructor.from_litellm(litellm.completion)
+
+
+class EstimationFailedError(Exception):
+    """El LLM no devolvió una estimación válida (o el proveedor falló) tras los reintentos."""
 
 
 def _model_name_for_provider(provider: str) -> str:
@@ -40,8 +50,23 @@ def _shorten(text: str, max_chars: int = 25) -> str:
     return text if len(text) <= max_chars else f"{text[:max_chars]}..."
 
 
+def _error_type(error: BaseException | None) -> str:
+    # Instructor envuelve el error original en InstructorRetryException: se clasifica por su causa
+    if isinstance(error, AuthenticationError):
+        return "auth"
+    if isinstance(error, RateLimitError):
+        return "rate_limit"
+    if isinstance(error, Timeout):
+        return "timeout"
+    if isinstance(error, APIError):
+        return "server_error"
+    if isinstance(error, ValidationError):
+        return "invalid_output"
+    return "unknown"
+
+
 # Endpoint de FastAPI sin streaming
-def estimate_project(request: EstimationRequest) -> tuple[str, int, int, str]:
+def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int, int, str]:
     system_prompt, user_prompt = render_estimation_prompt(request)
     model = _model_name_for_provider(settings.LLM_PROVIDER)
     tokens_input_estimated = len(system_prompt + user_prompt) // 4
@@ -58,29 +83,27 @@ def estimate_project(request: EstimationRequest) -> tuple[str, int, int, str]:
 
     start = time.perf_counter()
     try:
-        response = litellm.completion(
+        result, completion = _structured_client.create_with_completion(
             model=model,
             api_key=_api_key_for_provider(settings.LLM_PROVIDER),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_model=EstimationResult,
+            max_retries=settings.STRUCTURED_OUTPUT_MAX_RETRIES,
         )
-    except AuthenticationError as exc:
-        logger.error("llm_call_failed", error_type="auth", error=str(exc))
-        raise
-    except RateLimitError as exc:
-        logger.error("llm_call_failed", error_type="rate_limit", error=str(exc))
-        raise
-    except Timeout as exc:
-        logger.error("llm_call_failed", error_type="timeout", error=str(exc))
-        raise
-    except APIError as exc:
-        logger.error("llm_call_failed", error_type="server_error", error=str(exc))
-        raise
+    except InstructorRetryException as exc:
+        logger.error(
+            "llm_call_failed",
+            error_type=_error_type(exc.__cause__),
+            error=str(exc.__cause__),
+            attempts=exc.n_attempts,
+        )
+        raise EstimationFailedError("No valid estimation after retries") from exc
 
     latency_ms = (time.perf_counter() - start) * 1000
-    usage = response.usage
+    usage = completion.usage  # con reintentos Instructor acumula los tokens de todos los intentos
     tokens_output = usage.completion_tokens if usage else 0
     tokens_input = usage.prompt_tokens if usage else 0
 
@@ -89,10 +112,10 @@ def estimate_project(request: EstimationRequest) -> tuple[str, int, int, str]:
         tokens_output=tokens_output,
         latency_ms=round(latency_ms, 2),
         cost_usd=estimate_cost_usd(_bare_model_name(model), tokens_input, tokens_output),
-        finish_reason=response.choices[0].finish_reason,
+        finish_reason=completion.choices[0].finish_reason,
     )
 
-    return (response.choices[0].message.content, tokens_input, tokens_output, _bare_model_name(model))
+    return (result, tokens_input, tokens_output, _bare_model_name(model))
 
 # Versión con streaming, para la UI de Streamlit. Es un generador (yield en vez de return): la función no ejecuta nada hasta que alguien empieza a iterarla
 def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:

@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas.estimation import EstimationResult
+from app.services.llm_service import EstimationFailedError
 
 client = TestClient(app)
 
@@ -11,33 +13,50 @@ VALID_BODY = {
     "output_format": "narrative",
 }
 
+VALID_RESULT = {
+    "summary": "Mobile booking app with online payments.",
+    "confidence_pct": 80,
+    "phases": [
+        {"name": "Design", "duration_weeks": 2, "cost_eur": 4000, "summary": "Design the app."},
+        {"name": "Build", "duration_weeks": 3, "cost_eur": 6000, "summary": "Build the app."},
+    ],
+    "total_duration_weeks": 5,
+    "total_cost_eur": 10000,
+}
+
+
+def fake_estimate_project(request):
+    return EstimationResult.model_validate(VALID_RESULT), 100, 200, "gpt-4o-mini"
+
+
 def test_estimate_returns_response_contract(monkeypatch):
     # Se parchea el nombre donde se USA (router), no donde se define (llm_service),
     # porque "from x import f" copia la referencia al módulo que importa
-    monkeypatch.setattr(
-        "app.routers.estimations.estimate_project",
-        lambda request: ("# Estimación", 100, 200, "gpt-4o-mini"),
-    )
+    monkeypatch.setattr("app.routers.estimations.estimate_project", fake_estimate_project)
     response = client.post("/api/v1/estimate", json=VALID_BODY)
     assert response.status_code == 200
     assert response.json() == {
-        "estimation": "# Estimación",
+        "result": VALID_RESULT,
         "prompt_version": "v1",
-        "model": "gpt-4o-mini",
-        "provider": "openai",  # fijado en conftest.py
-        "tokens_input": 100,
-        "tokens_output": 200,
+        "cached": False,
     }
 
 
 def test_estimate_reports_prompt_version_from_settings(monkeypatch):
-    monkeypatch.setattr(
-        "app.routers.estimations.estimate_project",
-        lambda request: ("# Estimación", 1, 2, "gpt-4o-mini"),
-    )
+    monkeypatch.setattr("app.routers.estimations.estimate_project", fake_estimate_project)
     monkeypatch.setenv("PROMPT_VERSION", "v7")
     response = client.post("/api/v1/estimate", json=VALID_BODY)
     assert response.json()["prompt_version"] == "v7"
+
+
+def test_estimate_returns_502_when_llm_output_is_not_valid(monkeypatch):
+    def failing_estimate_project(request):
+        raise EstimationFailedError("No valid estimation after retries")
+
+    monkeypatch.setattr("app.routers.estimations.estimate_project", failing_estimate_project)
+    response = client.post("/api/v1/estimate", json=VALID_BODY)
+    assert response.status_code == 502
+    assert "No valid estimation" not in response.text  # no se filtra el detalle interno
 
 
 def test_estimate_rejects_short_description_without_calling_llm(monkeypatch):
