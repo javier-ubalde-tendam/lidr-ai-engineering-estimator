@@ -1,0 +1,127 @@
+TRANSCRIPCIÓN SIMULADA – REUNIÓN DE TOMA DE REQUISITOS
+Proyecto: Aplicación web para venta de tractores agrícolas
+Fecha: 26/09/2026
+
+Participantes:
+- Laura Martín, Responsable de Negocio – AgroMecánica Ibérica
+- Javier Ruiz, Responsable Comercial – AgroMecánica Ibérica
+- Marta Sánchez, Consultora Funcional – NovaSoft
+- Daniel Pérez, Arquitecto de Software – NovaSoft
+
+Marta: Gracias por vuestro tiempo. La idea de esta reunión es entender qué necesitáis de la nueva aplicación web y cuáles son los procesos de negocio principales que debemos cubrir.
+
+Laura: Nuestro objetivo es disponer de una web para vender tractores agrícolas directamente a clientes profesionales y particulares. Actualmente tenemos una web corporativa muy básica donde se muestran algunos modelos, pero el proceso comercial se hace por teléfono, correo electrónico o a través de nuestros distribuidores.
+
+Javier: Queremos que la nueva web nos ayude a generar ventas, pero hay que tener en cuenta que un tractor no se compra exactamente igual que un producto de consumo. El cliente suele querer configurar la máquina, solicitar financiación, entregar un tractor usado o hablar con un comercial antes de cerrar la operación.
+
+Marta: Entonces, ¿queréis comercio electrónico completo o principalmente generación de oportunidades comerciales?
+
+Laura: Idealmente las dos cosas. Para algunos modelos estándar queremos permitir cerrar la compra online, incluyendo el pago de una señal. Para tractores de mayor importe o configuraciones especiales, el cliente debería poder solicitar una oferta.
+
+Daniel: ¿Qué información tendrá cada tractor?
+
+Javier: Como mínimo: marca, modelo, potencia, tipo de transmisión, combustible, dimensiones, peso, capacidad hidráulica, compatibilidad con aperos, fotografías, vídeos, ficha técnica descargable, precio base y disponibilidad. También queremos indicar si el tractor está en stock, bajo pedido o disponible en una fecha estimada.
+
+Marta: ¿Habrá tractores nuevos y usados?
+
+Laura: Sí. Queremos vender nuevos, vehículos de demostración y usados. En los usados necesitamos kilometraje u horas de trabajo, año de fabricación, estado, ubicación y fotografías reales de la unidad.
+
+Daniel: ¿El catálogo será igual para todos los clientes?
+
+Javier: No necesariamente. Vendemos en varias regiones y algunos modelos o promociones pueden variar. Además, determinados clientes profesionales pueden tener condiciones comerciales especiales.
+
+Marta: Eso implica gestionar precios y promociones según mercado o tipo de cliente. ¿Los usuarios tendrán que registrarse?
+
+Laura: Para navegar y consultar precios generales, no. Para solicitar una oferta, guardar configuraciones o hacer una compra, sí queremos que se identifiquen.
+
+Marta: ¿Qué información debería tener la cuenta?
+
+Javier: Datos de contacto, dirección, tipo de cliente, explotaciones agrícolas si quiere informarlas, pedidos, presupuestos solicitados y configuraciones guardadas. Para empresas también razón social y NIF.
+
+Daniel: Hablemos del configurador. ¿Qué podrá elegir el usuario?
+
+Javier: Motor cuando haya alternativas, transmisión, neumáticos, cabina, sistemas GPS, climatización, enganches, cargador frontal, accesorios y algunos paquetes de mantenimiento. Las opciones compatibles dependen del modelo.
+
+Laura: Es importante evitar configuraciones imposibles. Si una opción requiere otra, la web debe indicarlo. Y si dos opciones son incompatibles, no debería permitir seleccionarlas juntas.
+
+Marta: ¿El precio se actualiza mientras configura?
+
+Laura: Sí. Queremos mostrar el precio estimado y el impacto de cada opción. Si el cliente tiene condiciones especiales, una vez identificado debería ver su precio cuando sea posible.
+
+Daniel: ¿Qué ocurre al finalizar la configuración?
+
+Javier: El cliente podrá guardarla, enviársela por correo, descargar un resumen en PDF o solicitar una oferta. Para determinados modelos también podrá iniciar la compra.
+
+Marta: ¿Cómo sería la compra online?
+
+Laura: Carrito, datos de facturación, dirección de entrega o selección de concesionario, aceptación de condiciones y pago de una señal. No queremos cobrar necesariamente el importe completo por internet. El resto se gestionará según financiación o transferencia.
+
+Marta: ¿Qué métodos de pago necesitáis?
+
+Laura: Tarjeta para la señal y transferencia bancaria. En una segunda fase podríamos integrar financiación.
+
+Javier: La financiación es importante. Como mínimo, desde el principio queremos un simulador sencillo de cuotas. Después nos gustaría conectarnos con nuestra financiera para hacer una solicitud real.
+
+Daniel: ¿Y la entrega de un tractor usado como parte del pago?
+
+Javier: Queremos una funcionalidad de tasación inicial. El cliente introduce marca, modelo, año, horas de trabajo, estado y fotografías. El sistema no tiene que dar una valoración definitiva, pero sí registrar la solicitud para que la revise un comercial.
+
+Marta: ¿Cómo se asignan esas oportunidades comerciales?
+
+Laura: Según código postal o provincia. Cada zona pertenece a un concesionario o comercial. La solicitud debe llegar automáticamente al responsable correspondiente.
+
+Daniel: ¿Necesitáis un backoffice?
+
+Laura: Sí, imprescindible. Desde ahí nuestros equipos deben gestionar catálogo, precios, stock, promociones, pedidos, solicitudes de oferta y solicitudes de tasación.
+
+Javier: También queremos que los comerciales puedan ver las oportunidades asignadas, cambiar su estado y añadir comentarios. Estados como “nueva”, “contactado”, “oferta enviada”, “negociación”, “ganada” o “perdida”.
+
+Marta: ¿Necesitáis integración con otros sistemas?
+
+Laura: Sí. Nuestro ERP tiene información de productos, precios, clientes, pedidos y stock. No queremos mantener esos datos manualmente en dos sitios.
+
+Daniel: Entonces habrá que definir qué sistema es maestro para cada dato. ¿Tenéis CRM?
+
+Javier: Sí, Salesforce. Las oportunidades generadas en la web deberían terminar en Salesforce. Los pedidos confirmados deben ir al ERP.
+
+Marta: ¿Y el stock?
+
+Laura: El stock del ERP. Nos gustaría que la web mostrase disponibilidad casi en tiempo real, aunque no hace falta que sea al segundo.
+
+Daniel: ¿Hay requisitos de búsqueda?
+
+Javier: Sí. El usuario debe poder buscar y filtrar por precio, potencia, marca, uso recomendado, tipo de transmisión, disponibilidad y nuevo/usado. También queremos comparar hasta tres tractores.
+
+Marta: ¿Queréis recomendaciones?
+
+Laura: Sería interesante que el usuario pudiera indicar tamaño de explotación, tipo de cultivo y tareas habituales, y que la web le sugiriese modelos adecuados. Pero lo consideramos secundario para la primera versión.
+
+Daniel: ¿Idiomas?
+
+Laura: Inicialmente español y portugués. Más adelante francés e inglés.
+
+Marta: ¿Hay algún requisito importante de experiencia de usuario?
+
+Javier: La mayoría de nuestros clientes consulta desde móvil, incluso desde el campo. La web debe funcionar muy bien en móvil y no puede ser pesada. También queremos que las fichas sean fáciles de compartir por WhatsApp.
+
+Daniel: ¿Necesitáis algún tipo de geolocalización?
+
+Laura: Solo para encontrar el concesionario más cercano introduciendo código postal o permitiendo ubicación si el usuario da permiso.
+
+Marta: ¿Qué comunicaciones recibirá el cliente?
+
+Javier: Confirmación de registro, solicitudes de oferta, pedidos, cambios de estado del pedido y recordatorios relacionados con presupuestos. Preferimos correo electrónico y, en algunos casos, SMS.
+
+Daniel: En cuanto a administración y seguridad, ¿habrá distintos perfiles?
+
+Laura: Sí. Administrador general, gestor de catálogo, comercial, concesionario y atención al cliente. Cada uno debería acceder solo a las funciones necesarias.
+
+Marta: Para resumir la primera versión: catálogo de tractores nuevos y usados, buscador y filtros, ficha detallada, comparador, registro de clientes, configurador con reglas de compatibilidad, solicitud de ofertas, pago de señal para determinados modelos, solicitudes de tasación de usados, backoffice comercial e integraciones con ERP y Salesforce.
+
+Laura: Correcto. Añadiría seguimiento de pedidos y localizador de concesionarios.
+
+Javier: Y para nosotros es clave medir el embudo comercial: visitas, configuraciones iniciadas, ofertas solicitadas, contactos comerciales, pedidos y ventas.
+
+Marta: Perfecto. Como siguiente paso prepararemos una propuesta funcional separando un MVP de las funcionalidades posteriores y detallaremos las integraciones necesarias.
+
+Laura: De acuerdo. Nos interesa que la primera versión pueda ponerse en producción con un catálogo limitado y que después podamos añadir funcionalidades de forma incremental.

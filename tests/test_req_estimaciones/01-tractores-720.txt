@@ -1,0 +1,41 @@
+Petición de estimación de proyecto
+
+Cliente: AgroTrack Industries S.L. — fabricante y distribuidor de tractores agrícolas con presencia en 34 países.
+
+Contexto del negocio
+
+AgroTrack vende tractores y maquinaria agrícola a través de una red de distribuidores locales en Europa, Latinoamérica, Norteamérica y Oceanía. Actualmente el proceso de venta, configuración de producto y seguimiento postventa se gestiona por teléfono, email y hojas de Excel compartidas entre los distribuidores y el equipo comercial central. Quieren digitalizar todo el ciclo: desde que un cliente final configura un tractor hasta que recibe soporte técnico tras la compra.
+
+Qué necesitamos construir
+
+Una aplicación web (portal B2B/B2C) y una app móvil (iOS y Android) que compartan el mismo backend y catálogo de producto.
+
+Aplicación web
+Catálogo y configurador de producto: el cliente elige modelo de tractor, potencia, tipo de tracción, accesorios (pala frontal, remolque, cabina climatizada, GPS de precisión) y ve el precio final actualizado en tiempo real según la configuración y el país (impuestos y aranceles distintos por región).
+Gestión multi-moneda y multi-idioma: precios en EUR, USD, GBP, BRL y ARS como mínimo; interfaz en español, inglés, portugués y francés.
+Localizador de distribuidores: mapa con los distribuidores oficiales más cercanos según geolocalización o código postal, con disponibilidad de stock por distribuidor.
+Panel del distribuidor: cada distribuidor tiene acceso a un panel para gestionar sus pedidos, ver comisiones, y actualizar el stock disponible de su zona.
+Panel de administración interno: el equipo de AgroTrack necesita ver todos los pedidos globales, gestionar precios por región, y generar informes de ventas por país, modelo y distribuidor.
+Gestión de garantías y mantenimiento: el cliente final puede registrar su tractor, consultar el calendario de mantenimiento recomendado, y abrir tickets de soporte técnico.
+Integración con pasarela de pago para señales/depósitos de reserva (el pago completo normalmente se gestiona offline con el distribuidor, pero quieren poder cobrar un depósito online para reservar unidades con alta demanda).
+App móvil (iOS + Android)
+Pensada principalmente para los técnicos de campo y los propios agricultores, no tanto para el proceso de venta (ese vive en la web).
+Modo offline parcial: muchos clientes trabajan en zonas rurales sin cobertura. La app debe permitir registrar incidencias de mantenimiento y consultarlas, sincronizando cuando vuelva la conexión.
+Notificaciones push para avisos de mantenimiento programado, recambios disponibles, y actualizaciones del estado de un pedido o ticket de soporte.
+Escaneo de código QR/NFC en cada tractor para acceder directamente a su ficha técnica, historial de mantenimiento y manual de usuario.
+Chat de soporte con el distribuidor o el servicio técnico central, con opción de adjuntar fotos y vídeos cortos de la avería.
+Login compartido con la web (mismo sistema de cuentas para cliente final y distribuidor).
+Integraciones necesarias
+ERP interno de AgroTrack (SAP) para sincronizar stock, precios y pedidos — ya tienen una API REST expuesta, pero con documentación limitada y rate limits bajos.
+Sistema de facturación de cada distribuidor (varía por país, no hay un estándar común; probablemente haya que empezar solo con los 5 mercados principales).
+Pasarela de pago (Stripe o similar) para los depósitos online.
+Servicio de geolocalización/mapas (Google Maps o Mapbox) para el localizador de distribuidores.
+Restricciones y consideraciones
+El tráfico es muy estacional: picos fuertes en primavera (campaña de siembra) y otoño (campaña de cosecha), con hasta 8x el tráfico normal en esos periodos.
+Cumplimiento de normativa de protección de datos distinta según región (RGPD en Europa, LGPD en Brasil, y requisitos locales en el resto de mercados).
+El equipo interno de AgroTrack tiene 2 desarrolladores junior que se incorporarán al proyecto a mitad de camino para dar mantenimiento una vez lanzado; el código debe quedar razonablemente documentado para que puedan hacerse cargo.
+Quieren lanzar primero en Europa y Latinoamérica (fase 1) y añadir Norteamérica y Oceanía en una fase 2, unos 4-6 meses después.
+No tienen diseño UX/UI todavía, solo un naming y un logo corporativo.
+Qué necesitamos de la estimación
+
+Una estimación que cubra la fase 1 completa (Europa + Latinoamérica, web + app móvil + integraciones con ERP y pasarela de pago), indicando fases, duración, coste aproximado y nivel de confianza, para poder presentarla al comité de dirección de AgroTrack antes de comprometernos con una fecha de lanzamiento para la próxima campaña de siembra.
