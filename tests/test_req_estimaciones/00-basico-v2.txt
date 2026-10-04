@@ -1,0 +1,1 @@
+El cliente, en una reunión con el equipo de marketing, comentó que necesita una página de aterrizaje con un formulario de contacto, integrarla con el CRM que usan actualmente (HubSpot), y añadir un blog con editor de texto enriquecido (WYSIWYG). Les gustaría tenerlo terminado en unas 4 semanas. El diseño ya está hecho en Figma.

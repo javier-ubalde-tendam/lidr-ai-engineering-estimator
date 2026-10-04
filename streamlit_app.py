@@ -3,13 +3,11 @@ import time
 
 import httpx
 import streamlit as st
-
 from pydantic import ValidationError
 
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.prompts.loader import render_estimation_prompt
-
 from app.schemas.estimation import (
     OUT_OF_SCOPE_PREFIX,
     DetailLevel,
@@ -158,7 +156,8 @@ with st.sidebar:
     st.subheader("Última llamada")
     metrics = st.session_state.get("last_metrics")
     if metrics:
-        st.caption(f"**Cache hit:** {metrics['cache_hit']}")
+        st.caption(f"**Exact cache hit:** {metrics.get('exact_cache_hit', metrics['cache_hit'])}")
+        st.caption(f"**Semantic cache hit:** {metrics.get('semantic_cache_hit', False)}")
         # En cache hit el servidor no llama al LLM: no hay proveedor, modelo ni tokens
         st.caption(f"**Proveedor:** {metrics.get('provider_used', '-')}")
         st.caption(f"**Modelo:** {metrics.get('model_used', '-')}")

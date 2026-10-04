@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"
     API_BASE_URL: str = "http://localhost:8000"
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    SEMANTIC_CACHE_THRESHOLD: float = 0.92
+    SEMANTIC_CACHE_TTL: int = 86400
+    # Modo seguro de despliegue: se calcula embedding + lookup + se logea el score, pero nunca
+    # se sirve el hit ni se salta el LLM. Pásalo a False en .env cuando confíes en los scores
+    # observados en los logs (semantic_cache_hit_log_only) para tu caso de uso
+    SEMANTIC_CACHE_LOG_ONLY: bool = True
 
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":

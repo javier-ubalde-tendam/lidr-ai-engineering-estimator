@@ -17,6 +17,7 @@ from app.guardrails.output import enforce_scope_response
 from app.logging_config import TRACE
 from app.prompts.loader import render_estimation_prompt
 from app.schemas.estimation import EstimationRequest, EstimationResult
+from app.semantic_cache import semantic_cache_lookup, semantic_cache_store
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -278,7 +279,19 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
     system_prompt, user_prompt = render_estimation_prompt(request)
     cache_key = build_cache_key(system_prompt, user_prompt)
     cached_result = _get_cached_result(cache_key)
-    cache_hit = cached_result is not None
+    exact_cache_hit = cached_result is not None
+    semantic_cache_hit = False
+
+    if cached_result is None:
+        # Más caro que el exact-match (llama a la API de embeddings): solo se intenta si ya hubo miss
+        cached_result = semantic_cache_lookup(request, settings.PROMPT_VERSION, get_openai_client())
+        semantic_cache_hit = cached_result is not None
+        if semantic_cache_hit:
+            # Promociona el hit semántico a exact-match: si se repite este mismo texto literal,
+            # la próxima vez se sirve sin volver a llamar a la API de embeddings
+            set_cached_estimation(cache_key, cached_result.model_dump_json())
+
+    cache_hit = exact_cache_hit or semantic_cache_hit
 
     tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
@@ -294,6 +307,8 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
 
     start = time.perf_counter()
     stats["cache_hit"] = cache_hit
+    stats["exact_cache_hit"] = exact_cache_hit
+    stats["semantic_cache_hit"] = semantic_cache_hit
 
     if cached_result is not None:
         # Mismo parser que con el LLM real: el cliente recibe los mismos estados parciales
@@ -340,5 +355,6 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
         stats["validation_warnings"] = warnings
     else:
         set_cached_estimation(cache_key, result.model_dump_json())
+        semantic_cache_store(request, result, settings.PROMPT_VERSION, get_openai_client())
     _log_llm_call_completed(stats, start)
     yield "complete", result

@@ -30,6 +30,14 @@ def bypass_input_guardrail(monkeypatch):
     # para que estos tests no dependan de la Moderation API real
     monkeypatch.setattr(llm_service, "check_input", lambda *args, **kwargs: None)
 
+
+@pytest.fixture(autouse=True)
+def bypass_semantic_cache(monkeypatch):
+    # El cache semántico se prueba aparte (tests/test_semantic_cache.py); aquí se neutraliza
+    # para no depender de Redis-stack ni de la API de embeddings real
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(llm_service, "semantic_cache_store", lambda *args, **kwargs: None)
+
 GOOD = {
     "summary": "Web platform with billing and reporting.",
     "confidence_pct": 80,
@@ -267,7 +275,7 @@ def test_stream_cache_hit_replays_the_cached_result_without_calling_the_llm(monk
     assert kinds.count("partial") > 1  # se trocea el JSON cacheado como si llegara en streaming
     assert kinds[-1] == "complete"
     assert events[-1][1] == cached
-    assert stats == {"cache_hit": True}
+    assert stats == {"cache_hit": True, "exact_cache_hit": True, "semantic_cache_hit": False}
 
 
 def test_stream_ignores_stale_cache_entries_that_are_not_valid_results(monkeypatch, fake_cache):
@@ -337,6 +345,75 @@ def test_stream_fails_without_caching_when_the_blocking_retry_also_fails(monkeyp
 
     assert {kind for kind, _ in events} == {"partial"}
     assert fake_cache == {}
+
+
+# --- Cache semántico (wiring; la lógica de threshold/log_only vive en test_semantic_cache.py) ---
+
+
+def test_stream_serves_a_semantic_cache_hit_without_calling_the_llm(monkeypatch, fake_cache):
+    semantic_hit = EstimationResult.model_validate(GOOD)
+    calls = use_fake_stream(monkeypatch, [GOOD])  # si se llamara al LLM, esto delataría la llamada
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda request, prompt_version, openai_client: semantic_hit)
+
+    events, stats = run_stream()
+
+    assert calls == []
+    assert (stats["exact_cache_hit"], stats["semantic_cache_hit"], stats["cache_hit"]) == (False, True, True)
+    assert events[-1] == ("complete", semantic_hit)
+
+
+def test_stream_promotes_a_semantic_cache_hit_to_the_exact_match_cache(monkeypatch, fake_cache):
+    # Repetir el mismo texto literal tras un hit semántico debe entrar ya por exact-match,
+    # sin volver a llamar a la API de embeddings
+    semantic_hit = EstimationResult.model_validate(GOOD)
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda request, prompt_version, openai_client: semantic_hit)
+
+    run_stream()  # primera vez: solo hay hit semántico
+
+    key = build_cache_key(*render_estimation_prompt(REQUEST))
+    assert EstimationResult.model_validate_json(fake_cache[key]) == semantic_hit
+
+
+def test_stream_falls_back_to_the_llm_when_the_semantic_cache_misses(monkeypatch, fake_cache):
+    calls = use_fake_stream(monkeypatch, [GOOD])
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda request, prompt_version, openai_client: None)
+
+    events, stats = run_stream()
+
+    assert len(calls) == 1  # no hubo hit (miss real o log-only): sigue el flujo normal
+    assert stats["semantic_cache_hit"] is False
+    assert events[-1][1] == EstimationResult.model_validate(GOOD)
+
+
+def test_stream_stores_in_the_semantic_cache_after_a_clean_result(monkeypatch, fake_cache):
+    use_fake_stream(monkeypatch, [GOOD])
+    stored = []
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda request, prompt_version, openai_client: None)
+    monkeypatch.setattr(
+        llm_service,
+        "semantic_cache_store",
+        lambda request, result, prompt_version, openai_client: stored.append(result),
+    )
+
+    events, _ = run_stream()
+
+    assert stored == [events[-1][1]]
+
+
+def test_stream_does_not_store_in_the_semantic_cache_when_totals_mismatch(monkeypatch, fake_cache):
+    # Misma condición de escritura que el exact-match: un resultado con avisos no se cachea
+    use_fake_stream(monkeypatch, [TOTALS_MISMATCH])
+    stored = []
+    monkeypatch.setattr(llm_service, "semantic_cache_lookup", lambda request, prompt_version, openai_client: None)
+    monkeypatch.setattr(
+        llm_service,
+        "semantic_cache_store",
+        lambda request, result, prompt_version, openai_client: stored.append(result),
+    )
+
+    run_stream()
+
+    assert stored == []
 
 
 def test_stream_falls_back_to_the_other_provider_when_the_primary_fails(monkeypatch, fake_cache):

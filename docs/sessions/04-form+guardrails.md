@@ -37,8 +37,10 @@ Se añade:
 ### Lanzar tests unitarios
 uv run pytest -v
 
-### Levantar docker redis (docker)
-docker run -d --name lidr-redis -p 6379:6379 redis:7-alpine
+### Levantar docker redis (necesita redis-stack, no redis:7-alpine, para el cache semántico/RediSearch)
+docker compose up -d
+# o, sin docker-compose:
+docker run -d --name lidr-redis -p 6379:6379 redis/redis-stack-server:latest
 
 ### Levantar uvicorn (servidor web) para uso de FastAPI
 uv run uvicorn app.main:app --reload
