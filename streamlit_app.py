@@ -285,6 +285,20 @@ else:
         except httpx.HTTPError as exc:
             st.error(f"No se pudo leer el estado de la sesión: {exc}")
         else:
-            st.caption(f"**Mensajes en historial:** {info['message_count']} / {info['max_turns'] * 2}")
+            # message_count cuenta mensajes (user+assistant); se divide entre 2 para mostrar pares/turnos
+            st.caption(f"**Mensajes en historial:** {info['message_count'] // 2} / {info['max_turns']}")
             st.subheader("Project metadata")
-            st.json(info["metadata"])
+            metadata = info["metadata"]
+            metadata_fields = [
+                ("Nombre del proyecto", metadata.get("project_name")),
+                ("Tamaño del equipo", metadata.get("assumed_team_size")),
+                ("Tecnologías", ", ".join(metadata.get("mentioned_technologies") or [])),
+                ("Alcance acordado", metadata.get("agreed_scope")),
+            ]
+            shown = False
+            for label, value in metadata_fields:
+                if value:  # solo se muestra un campo si tiene valor
+                    st.caption(f"**{label}:** {value}")
+                    shown = True
+            if not shown:
+                st.caption("Todavía no hay hechos conocidos del proyecto.")

@@ -76,6 +76,6 @@ Se añadió un camino conversacional con memoria: historial (ventana deslizante)
 `project_metadata` acumulado (extraído por un segundo LLM barato tras cada turno, fusionado con lo
 ya sabido). Los adjuntos (`.pdf`, `.docx`) se extraen **localmente** (Camino B) y se envían como
 texto dentro del prompt, en vez de usar la Files API de un proveedor: así el resultado sigue
-siendo compatible con el fallback OpenAI↔Anthropic ya existente y da más control (truncado, logs).
+siendo compatible con el fallback OpenAI↔Anthropic ya existente y da más control (truncado, logs), además de dejarlo preparado para futuras ampliaciones a RAG.
 Detalle completo de las decisiones de diseño en
 [docs/sessions/05-memory+attachments.md](docs/sessions/05-memory+attachments.md).
