@@ -58,6 +58,26 @@ def _to_bytes(embedding: list[float]) -> bytes:
     return array.array("f", embedding).tobytes()
 
 
+def _index_missing(exc: Exception) -> bool:
+    # Pasa tras un reinicio del contenedor Redis: los datos sobreviven (RDB) pero el índice no
+    return "no such index" in str(exc).lower()
+
+
+def _run_with_index_recovery(operation):
+    """Ejecuta operation(); si falla porque el índice no existe, lo recrea una vez y reintenta."""
+    try:
+        return operation()
+    except _SOFT_FAILURE_ERRORS as exc:
+        if not _index_missing(exc):
+            raise
+        logger.warning("semantic_cache_index_missing_retrying", error=str(exc))
+        try:
+            index.create()
+        except _SOFT_FAILURE_ERRORS as create_exc:
+            raise exc from create_exc
+        return operation()
+
+
 def build_semantic_bucket(request: EstimationRequest, prompt_version: str) -> str:
     # output_format no cambia hoy el prompt generado en v2 (solo la presentación en Streamlit),
     # pero se incluye igualmente por si una futura versión del prompt sí varía con él
@@ -78,16 +98,21 @@ def semantic_cache_lookup(
     bucket = build_semantic_bucket(request, prompt_version)
     try:
         embedding = _embed(request.description, openai_client)
-        query = VectorQuery(
-            vector=_to_bytes(embedding),
-            vector_field_name="embedding",
-            return_fields=["result_json"],
-            filter_expression=Tag("bucket") == bucket,
-            num_results=1,
-        )
-        results = index.query(query)
     except _SOFT_FAILURE_ERRORS as exc:
         # Fail soft: un cache semántico caído nunca debe impedir la estimación, solo degradarla a miss
+        logger.warning("semantic_cache_lookup_failed", error_type=type(exc).__name__, error=str(exc))
+        return None
+
+    query = VectorQuery(
+        vector=_to_bytes(embedding),
+        vector_field_name="embedding",
+        return_fields=["result_json"],
+        filter_expression=Tag("bucket") == bucket,
+        num_results=1,
+    )
+    try:
+        results = _run_with_index_recovery(lambda: index.query(query))
+    except _SOFT_FAILURE_ERRORS as exc:
         logger.warning("semantic_cache_lookup_failed", error_type=type(exc).__name__, error=str(exc))
         return None
 
@@ -116,10 +141,13 @@ def semantic_cache_store(
     bucket = build_semantic_bucket(request, prompt_version)
     try:
         embedding = _embed(request.description, openai_client)
-        index.load(
-            [{"bucket": bucket, "result_json": result.model_dump_json(), "embedding": _to_bytes(embedding)}],
-            ttl=settings.SEMANTIC_CACHE_TTL,
-        )
+    except _SOFT_FAILURE_ERRORS as exc:
+        logger.warning("semantic_cache_store_failed", error_type=type(exc).__name__, error=str(exc))
+        return
+
+    doc = {"bucket": bucket, "result_json": result.model_dump_json(), "embedding": _to_bytes(embedding)}
+    try:
+        _run_with_index_recovery(lambda: index.load([doc], ttl=settings.SEMANTIC_CACHE_TTL))
     except _SOFT_FAILURE_ERRORS as exc:
         logger.warning("semantic_cache_store_failed", error_type=type(exc).__name__, error=str(exc))
         return

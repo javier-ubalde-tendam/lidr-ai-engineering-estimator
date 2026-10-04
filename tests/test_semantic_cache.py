@@ -8,6 +8,7 @@ from app.schemas.estimation import (
     ProjectType,
 )
 from app.semantic_cache import build_semantic_bucket, semantic_cache_lookup, semantic_cache_store
+from redisvl.exceptions import RedisVLError
 
 GOOD_RESULT = EstimationResult(
     summary="Mobile booking app with online payments.",
@@ -47,6 +48,43 @@ class FakeIndex:
     def load(self, data: list[dict], ttl: int | None = None) -> list[str]:
         self.loaded.append((data, ttl))
         return ["fake-key"]
+
+
+class FlakyIndex(FakeIndex):
+    """Simula un índice ausente (p.ej. tras un reinicio del contenedor Redis) que se recupera al recrearlo."""
+
+    def __init__(self, query_results: list[dict] | None = None) -> None:
+        super().__init__(query_results)
+        self.create_calls = 0
+        self._attempts = 0
+
+    def create(self) -> None:
+        self.create_calls += 1
+
+    def query(self, query) -> list[dict]:
+        self._attempts += 1
+        if self._attempts == 1:
+            raise RedisVLError("Error while searching: No such index semantic_cache")
+        return super().query(query)
+
+    def load(self, data: list[dict], ttl: int | None = None) -> list[str]:
+        self._attempts += 1
+        if self._attempts == 1:
+            raise RedisVLError("Error while searching: No such index semantic_cache")
+        return super().load(data, ttl)
+
+
+class AlwaysMissingIndex(FakeIndex):
+    """El índice sigue sin existir incluso después de intentar recrearlo (Redis realmente caído)."""
+
+    def create(self) -> None:
+        pass
+
+    def query(self, query) -> list[dict]:
+        raise RedisVLError("Error while searching: No such index semantic_cache")
+
+    def load(self, data: list[dict], ttl: int | None = None) -> list[str]:
+        raise RedisVLError("Error while searching: No such index semantic_cache")
 
 
 def make_request(**overrides) -> EstimationRequest:
@@ -124,3 +162,44 @@ def test_store_saves_the_bucket_and_the_serialized_result(monkeypatch):
     assert data[0]["bucket"] == build_semantic_bucket(request, "v2")
     assert data[0]["result_json"] == GOOD_RESULT.model_dump_json()
     assert ttl == semantic_cache.settings.SEMANTIC_CACHE_TTL
+
+
+# --- Auto-recuperación cuando el índice desaparece (p.ej. tras un reinicio del contenedor Redis) ---
+
+
+def test_lookup_recreates_the_index_and_retries_when_it_is_missing(monkeypatch):
+    monkeypatch.setattr(semantic_cache.settings, "SEMANTIC_CACHE_LOG_ONLY", False)
+    flaky_index = FlakyIndex(
+        query_results=[{"result_json": GOOD_RESULT.model_dump_json(), "vector_distance": "0.01"}]
+    )
+    monkeypatch.setattr(semantic_cache, "index", flaky_index)
+
+    result = semantic_cache_lookup(make_request(), "v2", FakeOpenAIClient())
+
+    assert result == GOOD_RESULT
+    assert flaky_index.create_calls == 1  # se recreó una vez y el reintento tuvo éxito
+
+
+def test_lookup_misses_softly_when_the_index_stays_missing(monkeypatch):
+    monkeypatch.setattr(semantic_cache, "index", AlwaysMissingIndex())
+
+    result = semantic_cache_lookup(make_request(), "v2", FakeOpenAIClient())
+
+    assert result is None  # recrear tampoco ayudó (Redis realmente caído): se degrada a miss, no revienta
+
+
+def test_store_recreates_the_index_and_retries_when_it_is_missing(monkeypatch):
+    flaky_index = FlakyIndex()
+    monkeypatch.setattr(semantic_cache, "index", flaky_index)
+
+    semantic_cache_store(make_request(), GOOD_RESULT, "v2", FakeOpenAIClient())
+
+    assert flaky_index.create_calls == 1
+    assert len(flaky_index.loaded) == 1  # el reintento sí llegó a guardar el documento
+
+
+def test_store_fails_softly_when_the_index_stays_missing(monkeypatch):
+    monkeypatch.setattr(semantic_cache, "index", AlwaysMissingIndex())
+
+    semantic_cache_store(make_request(), GOOD_RESULT, "v2", FakeOpenAIClient())  # no debe lanzar
+

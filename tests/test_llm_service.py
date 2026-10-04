@@ -334,6 +334,29 @@ def test_stream_truncated_json_is_not_accepted_as_complete(monkeypatch, fake_cac
     assert stats["blocking_fallback_used"] is True
 
 
+def test_stream_runs_the_output_scope_guardrail_on_the_happy_path(monkeypatch, fake_cache):
+    use_fake_stream(monkeypatch, [GOOD])
+    received = []
+    monkeypatch.setattr(llm_service, "enforce_scope_response", lambda result: received.append(result) or result)
+
+    events, _ = run_stream()
+
+    assert received == [events[-1][1]]  # se llama exactamente una vez, con el resultado final
+
+
+def test_stream_does_not_double_apply_the_output_scope_guardrail_on_blocking_fallback(monkeypatch, fake_cache):
+    # estimate_project() ya aplica el guardrail internamente: el camino de fallback no debe repetirlo
+    use_fake_stream(monkeypatch, [json.dumps(GOOD)[:-30]])  # JSON truncado -> dispara el fallback bloqueante
+    use_fake_llm(monkeypatch, [GOOD])
+    received = []
+    monkeypatch.setattr(llm_service, "enforce_scope_response", lambda result: received.append(result) or result)
+
+    events, stats = run_stream()
+
+    assert stats["blocking_fallback_used"] is True
+    assert received == [events[-1][1]]  # una sola vez en total, no cero ni dos
+
+
 def test_stream_fails_without_caching_when_the_blocking_retry_also_fails(monkeypatch, fake_cache):
     use_fake_stream(monkeypatch, [LOW_CONFIDENCE_WITHOUT_PREFIX])
     use_fake_llm(monkeypatch, [LOW_CONFIDENCE_WITHOUT_PREFIX])

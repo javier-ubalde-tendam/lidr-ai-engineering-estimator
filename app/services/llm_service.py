@@ -334,6 +334,7 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
             yield "partial", last_state
         # Instructor no valida un JSON truncado; model_dump() fuerza la revalidación (una instancia no se revalida)
         result = EstimationResult.model_validate(last_state.model_dump())
+        result = enforce_scope_response(result)  # red de seguridad si el model_validator no disparó
     except (ValueError, AuthenticationError, RateLimitError, Timeout, APIError) as exc:
         # ValidationError (y los errores de JSON de jiter) heredan de ValueError
         logger.warning(
@@ -345,6 +346,7 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
         )
         # Política de fallo: se descartan los parciales y se reintenta con Instructor bloqueante
         stats["blocking_fallback_used"] = True
+        # estimate_project() ya aplica enforce_scope_response internamente: no se repite aquí
         result, tokens_input, tokens_output, model = estimate_project(request)
         stats["tokens_input"] = stats.get("tokens_input", 0) + tokens_input
         stats["tokens_output"] = stats.get("tokens_output", 0) + tokens_output
