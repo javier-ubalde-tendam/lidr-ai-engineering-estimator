@@ -9,15 +9,28 @@ from instructor.core.exceptions import InstructorRetryException
 from litellm import APIError, AuthenticationError, RateLimitError, Timeout
 from pydantic import ValidationError
 
+from app.attachments.extractor import enrich_transcript
 from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
 from app.config import estimate_cost_usd, get_settings
 from app.dependencies import get_openai_client
 from app.guardrails.input import check_input
 from app.guardrails.output import enforce_scope_response
 from app.logging_config import TRACE
-from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import EstimationRequest, EstimationResult
+from app.prompts.loader import (
+    render_conversational_prompt,
+    render_conversational_user,
+    render_estimation_prompt,
+)
+from app.schemas.estimation import (
+    DetailLevel,
+    EstimationRequest,
+    EstimationResult,
+    OutputFormat,
+    ProjectType,
+)
 from app.semantic_cache import semantic_cache_lookup, semantic_cache_store
+from app.sessions.metadata_extractor import update_metadata
+from app.sessions.models import Session
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -77,12 +90,38 @@ def _totals_warnings(result: EstimationResult) -> list[str]:
     return [f"totals_match_phases: {mismatch}"]
 
 
+def _call_structured_estimation(messages: list[dict], model: str, **log_context: Any) -> tuple[EstimationResult, Any]:
+    # messages es un array arbitrario: [system, user] en el flujo clásico, o
+    # [system, *historial, user] en el conversacional; log_context añade claves extra al log de fallo
+    try:
+        return _structured_client.create_with_completion(
+            model=model,
+            api_key=_api_key_for_provider(settings.LLM_PROVIDER),
+            messages=messages,
+            response_model=EstimationResult,
+            max_retries=settings.STRUCTURED_OUTPUT_MAX_RETRIES,
+        )
+    except InstructorRetryException as exc:
+        logger.error(
+            "llm_call_failed",
+            error_type=_error_type(exc.__cause__),
+            error=str(exc.__cause__),
+            attempts=exc.n_attempts,
+            **log_context,
+        )
+        raise EstimationFailedError("No valid estimation after retries") from exc
+
+
 # Endpoint de FastAPI sin streaming
 def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int, int, str]:
     # Nunca se llama al LLM con un input que no ha pasado los guardrails
     check_input(request.description, openai_client=get_openai_client())
     system_prompt, user_prompt = render_estimation_prompt(request)
     model = _model_name_for_provider(settings.LLM_PROVIDER)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
     tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
         "llm_call_started",
@@ -96,25 +135,7 @@ def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int,
     )
 
     start = time.perf_counter()
-    try:
-        result, completion = _structured_client.create_with_completion(
-            model=model,
-            api_key=_api_key_for_provider(settings.LLM_PROVIDER),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_model=EstimationResult,
-            max_retries=settings.STRUCTURED_OUTPUT_MAX_RETRIES,
-        )
-    except InstructorRetryException as exc:
-        logger.error(
-            "llm_call_failed",
-            error_type=_error_type(exc.__cause__),
-            error=str(exc.__cause__),
-            attempts=exc.n_attempts,
-        )
-        raise EstimationFailedError("No valid estimation after retries") from exc
+    result, completion = _call_structured_estimation(messages, model)
 
     _totals_warnings(result)  # sin reintento por totales: solo queda registrado en el log
     result = enforce_scope_response(result)  # red de seguridad si el model_validator no disparó
@@ -132,6 +153,90 @@ def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int,
     )
 
     return (result, tokens_input, tokens_output, _bare_model_name(model))
+
+
+def _with_attachment_reference(transcript: str, attachment_filenames: list[str]) -> str:
+    # El historial guarda una referencia a los nombres de los adjuntos, no su contenido completo:
+    # repetirlo en cada turno sería caro en tokens y los hechos relevantes ya viven en el metadata
+    if not attachment_filenames:
+        return transcript
+    names = ", ".join(attachment_filenames)
+    return f"{transcript}\n\n(Attachments uploaded in this turn: {names})"
+
+
+def estimate_conversational(
+    session: Session,
+    transcript: str,
+    attachments: list[tuple[str, str]],
+    project_type: ProjectType,
+    detail_level: DetailLevel,
+    output_format: OutputFormat,
+) -> EstimationResult:
+    """Turno conversacional: usa el historial de la sesión y el project_metadata acumulado.
+
+    A diferencia de estimate_project(), NO consulta ni escribe la cache exact-match ni la
+    semántica: la respuesta depende del historial y del metadata de la sesión, y la clave de
+    cache actual (system + user) no los tiene en cuenta, así que daría hits incorrectos entre
+    sesiones distintas (o entre turnos de la misma sesión).
+    """
+    enriched_transcript = enrich_transcript(transcript=transcript, attachments=attachments)
+    # El contenido de un adjunto es input no confiable (posible prompt injection): mismo guardrail
+    check_input(enriched_transcript, openai_client=get_openai_client())
+
+    system_prompt, user_prompt = render_conversational_prompt(
+        transcript=enriched_transcript,
+        project_type=project_type.value,
+        detail_level=detail_level.value,
+        metadata=session.metadata,
+    )
+    history_messages = session.history.to_messages_list(system_prompt)
+    messages = [*history_messages, {"role": "user", "content": user_prompt}]
+
+    model = _model_name_for_provider(settings.LLM_PROVIDER)
+    tokens_input_estimated = len(system_prompt + user_prompt) // 4
+    logger.info(
+        "llm_call_started",
+        model_requested=model,
+        provider=settings.LLM_PROVIDER,
+        tokens_input_estimated=tokens_input_estimated,
+        session_id=session.session_id,
+        history_messages=len(history_messages),
+        detail_level=detail_level.value,
+        output_format=output_format.value,
+        prompt_version=settings.CONVERSATIONAL_PROMPT_VERSION,
+    )
+
+    start = time.perf_counter()
+    result, completion = _call_structured_estimation(
+        messages, model, session_id=session.session_id, history_messages=len(history_messages)
+    )
+
+    _totals_warnings(result)
+    result = enforce_scope_response(result)
+    latency_ms = (time.perf_counter() - start) * 1000
+    usage = completion.usage
+    tokens_output = usage.completion_tokens if usage else 0
+    tokens_input = usage.prompt_tokens if usage else 0
+
+    logger.info(
+        "llm_call_completed",
+        tokens_output=tokens_output,
+        latency_ms=round(latency_ms, 2),
+        cost_usd=estimate_cost_usd(_bare_model_name(model), tokens_input, tokens_output),
+        finish_reason=completion.choices[0].finish_reason,
+        session_id=session.session_id,
+        history_messages=len(history_messages),
+    )
+
+    attachment_filenames = [filename for filename, _ in attachments]
+    history_user_content = render_conversational_user(
+        transcript=_with_attachment_reference(transcript, attachment_filenames),
+        project_type=project_type.value,
+    )
+    session.history.append(user=history_user_content, assistant=result.model_dump_json())
+    session.metadata = update_metadata(session.metadata, enriched_transcript, result)
+
+    return result
 
 # Versión con streaming, para la UI de Streamlit. Es un generador (yield en vez de return): la función no ejecuta nada hasta que alguien empieza a iterarla
 def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:

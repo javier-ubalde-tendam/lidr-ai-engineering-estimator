@@ -1,0 +1,16 @@
+<previous_metadata>
+project_name: {{ previous_metadata.project_name }}
+assumed_team_size: {{ previous_metadata.assumed_team_size }}
+mentioned_technologies: {{ previous_metadata.mentioned_technologies | join(", ") }}
+agreed_scope: {{ previous_metadata.agreed_scope }}
+</previous_metadata>
+
+<transcript>
+{{ transcript }}
+</transcript>
+
+<estimation_summary>
+{{ estimation_summary }}
+</estimation_summary>
+
+Extract the updated facts following the rules above.

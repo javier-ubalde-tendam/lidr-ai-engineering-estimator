@@ -1,7 +1,7 @@
 [project]
 name = "lidr-ai-engineering-estimator"
 version = "0.1.0"
-description = "AI-powered project estimation tool - Session 02 (CAG)"
+description = "AI-powered project estimation tool - Session 05 (conversational memory + attachments)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.141.1",
@@ -11,6 +11,9 @@ dependencies = [
     "litellm>=1.83.0",
     "openai>=3.3.0",
     "pydantic-settings>=2.15.0",
+    "pypdf>=5.1.0",
+    "python-docx>=1.1.2",
+    "python-multipart>=0.0.20",
     "redis>=8.1.0",
     "redisvl>=0.27.2",
     "streamlit>=1.64.0",
@@ -24,6 +27,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "fpdf2>=2.8.9",
 ]
 
 [tool.pytest.ini_options]
@@ -32,6 +36,11 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.flake8-bugbear]
+# Patrón recomendado por FastAPI: Depends()/Form()/File() en los defaults de los parámetros
+# son el mecanismo de inyección de dependencias, no una llamada mutable accidental (B008)
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.File"]
 
 [tool.mypy]
 python_version = "3.11"

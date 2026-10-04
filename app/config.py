@@ -1,6 +1,7 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -12,6 +13,13 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 1
     STRUCTURED_OUTPUT_MAX_RETRIES: int = 2
     PROMPT_VERSION: str = "v2"
+    CONVERSATIONAL_PROMPT_VERSION: str = "v3"
+    # Pares user+assistant que conserva la ventana deslizante del historial conversacional
+    MAX_CONVERSATION_TURNS: int = 6
+    # Límite de caracteres por adjunto extraído (trunca, no rechaza)
+    MAX_ATTACHMENT_CHARS: int = 60000
+    # Modelo barato para la segunda llamada (Instructor) que extrae el project_metadata
+    METADATA_EXTRACTOR_MODEL: str = "gpt-4o-mini"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"

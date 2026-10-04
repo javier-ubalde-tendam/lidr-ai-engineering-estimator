@@ -71,99 +71,220 @@ def show_result(result: dict, output_format: OutputFormat) -> None:
             st.markdown(f"**{p['name']}** ({p['duration_weeks']} semanas, {p['cost_eur']} €). {p['summary']}")
     st.write(f"**Total:** {result['total_cost_eur']} € en {result['total_duration_weeks']} semanas")
 
-st.title("IA Estimator - Formulario tipado")
 
-with st.form("estimation_form"):
-    description = st.text_area("Descripción del proyecto", height=200)
-    project_type = st.selectbox(
-        "Tipo de proyecto",
-        options=list(ProjectType),
-        format_func=lambda p: p.value,  # muestra "web_saas" en vez de "ProjectType.WEB_SAAS"
-    )
-    detail_level = st.selectbox(
-        "Nivel de detalle",
-        options=list(DetailLevel),
-        format_func=lambda d: d.value,  # muestra "summary" en vez de "DetailLevel.SUMMARY"
-    )
-    output_format = st.selectbox(
-        "Formato de salida",
-        options=list(OutputFormat),
-        format_func=lambda o: o.value,  # muestra "phases_table" en vez de "OutputFormat.PHASES_TABLE"
-    )
-    submitted = st.form_submit_button("Estimar")
+# --- Modo conversacional (sesión 05): historial + project_metadata + adjuntos ---
 
-if submitted:
+def create_session_via_api() -> str:
+    url = f"{get_settings().API_BASE_URL}/sessions"
+    response = httpx.post(url, timeout=30)
+    response.raise_for_status()
+    return response.json()["session_id"]
+
+def get_session_info_via_api(session_id: str) -> dict:
+    url = f"{get_settings().API_BASE_URL}/sessions/{session_id}"
+    response = httpx.get(url, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+def estimate_conversational_via_api(
+    session_id: str,
+    transcript: str,
+    project_type: ProjectType,
+    detail_level: DetailLevel,
+    output_format: OutputFormat,
+    uploaded_files: list,
+) -> EstimationResponse:
+    url = f"{get_settings().API_BASE_URL}/sessions/{session_id}/estimate"
+    data = {
+        "transcript": transcript,
+        "project_type": project_type.value,
+        "detail_level": detail_level.value,
+        "output_format": output_format.value,
+    }
+    # Un único campo "attachments" repetido: así lo espera list[UploadFile] en el endpoint
+    files = [("attachments", (f.name, f.getvalue(), f.type)) for f in uploaded_files]
+    response = httpx.post(url, data=data, files=files, timeout=120)
+    response.raise_for_status()
+    return EstimationResponse.model_validate(response.json())
+
+def show_api_error(exc: httpx.HTTPStatusError) -> None:
+    # Mismo formato que en el modo formulario: el 400 de los guardrails viaja como {"reason", "message"}
     try:
-        request = EstimationRequest(
-            description=description,
-            project_type=project_type,
-            detail_level=detail_level,
-            output_format=output_format,
+        detail = exc.response.json().get("detail")
+    except ValueError:
+        detail = exc.response.text
+    if isinstance(detail, dict) and "reason" in detail:
+        st.error(f"Entrada bloqueada ({detail['reason']}): {detail['message']}")
+    else:
+        st.error(f"Error del servicio ({exc.response.status_code}): {detail or exc}")
+
+
+st.title("IA Estimator")
+
+mode = st.radio(
+    "Modo",
+    options=["Formulario (stream)", "Conversación (memoria + adjuntos)"],
+    horizontal=True,
+)
+
+if mode == "Formulario (stream)":
+    with st.form("estimation_form"):
+        description = st.text_area("Descripción del proyecto", height=200)
+        project_type = st.selectbox(
+            "Tipo de proyecto",
+            options=list(ProjectType),
+            format_func=lambda p: p.value,  # muestra "web_saas" en vez de "ProjectType.WEB_SAAS"
         )
-    except ValidationError as exc:
-        # exc.errors() es una lista de dicts: "loc" = campo, "msg" = motivo
-        for err in exc.errors():
-            st.error(f"{err['loc'][0]}: {err['msg']}")
-    else:
-        stats: dict = {}  # el generador lo rellena al recibir el evento "metrics"
-        placeholder = st.empty()  # un único hueco que se reescribe con cada estado parcial
-        result, error = None, None
+        detail_level = st.selectbox(
+            "Nivel de detalle",
+            options=list(DetailLevel),
+            format_func=lambda d: d.value,  # muestra "summary" en vez de "DetailLevel.SUMMARY"
+        )
+        output_format = st.selectbox(
+            "Formato de salida",
+            options=list(OutputFormat),
+            format_func=lambda o: o.value,  # muestra "phases_table" en vez de "OutputFormat.PHASES_TABLE"
+        )
+        submitted = st.form_submit_button("Estimar")
+
+    if submitted:
         try:
-            start = time.perf_counter()
-            for event, payload in stream_estimation_via_api(request, stats):
-                if event == "partial":
-                    placeholder.json(payload)  # provisional: campos a null y números a medias
-                elif event == "complete":
-                    result = payload
-                elif event == "error":
-                    error = payload["detail"]
-            elapsed = time.perf_counter() - start   # incluye la latencia HTTP, no solo la del LLM
-        except httpx.HTTPStatusError as exc:
-            # El 400 de los guardrails de input viaja como {"reason", "message"}; el 502 del LLM, como string
-            detail = exc.response.json().get("detail")
-            if isinstance(detail, dict) and "reason" in detail:
-                st.error(f"Entrada bloqueada ({detail['reason']}): {detail['message']}")
-            else:
-                st.error(f"Error al llamar al servicio IA: {detail or exc}")
-        except httpx.HTTPError as exc:
-            st.error(f"Error al llamar al servicio IA: {exc}")
+            request = EstimationRequest(
+                description=description,
+                project_type=project_type,
+                detail_level=detail_level,
+                output_format=output_format,
+            )
+        except ValidationError as exc:
+            # exc.errors() es una lista de dicts: "loc" = campo, "msg" = motivo
+            for err in exc.errors():
+                st.error(f"{err['loc'][0]}: {err['msg']}")
         else:
-            if result:
-                with placeholder.container():  # sustituye el JSON parcial por el resultado validado
-                    show_result(result, request.output_format)
+            stats: dict = {}  # el generador lo rellena al recibir el evento "metrics"
+            placeholder = st.empty()  # un único hueco que se reescribe con cada estado parcial
+            result, error = None, None
+            try:
+                start = time.perf_counter()
+                for event, payload in stream_estimation_via_api(request, stats):
+                    if event == "partial":
+                        placeholder.json(payload)  # provisional: campos a null y números a medias
+                    elif event == "complete":
+                        result = payload
+                    elif event == "error":
+                        error = payload["detail"]
+                elapsed = time.perf_counter() - start   # incluye la latencia HTTP, no solo la del LLM
+            except httpx.HTTPStatusError as exc:
+                # El 400 de los guardrails de input viaja como {"reason", "message"}; el 502 del LLM, como string
+                detail = exc.response.json().get("detail")
+                if isinstance(detail, dict) and "reason" in detail:
+                    st.error(f"Entrada bloqueada ({detail['reason']}): {detail['message']}")
+                else:
+                    st.error(f"Error al llamar al servicio IA: {detail or exc}")
+            except httpx.HTTPError as exc:
+                st.error(f"Error al llamar al servicio IA: {exc}")
             else:
-                placeholder.error(error or "El servicio no devolvió ninguna estimación")
-            # {**d, "k": v} copia el dict y añade una clave (como un putAll de Map en Java)
-            st.session_state.last_metrics = {**stats, "elapsed_seconds": elapsed}
-            st.session_state.last_prompts = render_estimation_prompt(request, stats["prompt_version"])
+                if result:
+                    with placeholder.container():  # sustituye el JSON parcial por el resultado validado
+                        show_result(result, request.output_format)
+                else:
+                    placeholder.error(error or "El servicio no devolvió ninguna estimación")
+                # {**d, "k": v} copia el dict y añade una clave (como un putAll de Map en Java)
+                st.session_state.last_metrics = {**stats, "elapsed_seconds": elapsed}
+                st.session_state.last_prompts = render_estimation_prompt(request, stats["prompt_version"])
 
-# Panel lateral: se pinta después del formulario para ver los datos de esta misma ejecución
-with st.sidebar:
-    # Validaciones blandas: el resultado se muestra igualmente, pero el usuario debe saber que falló una
-    for warning in st.session_state.get("last_metrics", {}).get("validation_warnings", []):
-        st.error(f"Validación no superada: {warning}")
-    st.header("Contexto del LLM")
-    prompts = st.session_state.get("last_prompts")
-    if prompts:
-        system_prompt, user_prompt = prompts
-        with st.expander("System prompt"):
-            st.text(system_prompt)
-        with st.expander("User prompt"):
-            st.text(user_prompt)
-    else:
-        st.caption("Se mostrará tras la primera estimación.")
+    # Panel lateral: se pinta después del formulario para ver los datos de esta misma ejecución
+    with st.sidebar:
+        # Validaciones blandas: el resultado se muestra igualmente, pero el usuario debe saber que falló una
+        for warning in st.session_state.get("last_metrics", {}).get("validation_warnings", []):
+            st.error(f"Validación no superada: {warning}")
+        st.header("Contexto del LLM")
+        prompts = st.session_state.get("last_prompts")
+        if prompts:
+            system_prompt, user_prompt = prompts
+            with st.expander("System prompt"):
+                st.text(system_prompt)
+            with st.expander("User prompt"):
+                st.text(user_prompt)
+        else:
+            st.caption("Se mostrará tras la primera estimación.")
 
-    st.subheader("Última llamada")
-    metrics = st.session_state.get("last_metrics")
-    if metrics:
-        st.caption(f"**Exact cache hit:** {metrics.get('exact_cache_hit', metrics['cache_hit'])}")
-        st.caption(f"**Semantic cache hit:** {metrics.get('semantic_cache_hit', False)}")
-        # En cache hit el servidor no llama al LLM: no hay proveedor, modelo ni tokens
-        st.caption(f"**Proveedor:** {metrics.get('provider_used', '-')}")
-        st.caption(f"**Modelo:** {metrics.get('model_used', '-')}")
-        st.caption(f"**Versión del prompt:** {metrics['prompt_version']}")
-        st.caption(f"**Tokens entrada:** {metrics.get('tokens_input', '-')}")
-        st.caption(f"**Tokens salida:** {metrics.get('tokens_output', '-')}")
-        st.caption(f"**Tiempo:** {metrics['elapsed_seconds']:.2f} s")
-    else:
-        st.caption("Todavía no se ha generado ninguna estimación.")
+        st.subheader("Última llamada")
+        metrics = st.session_state.get("last_metrics")
+        if metrics:
+            st.caption(f"**Exact cache hit:** {metrics.get('exact_cache_hit', metrics['cache_hit'])}")
+            st.caption(f"**Semantic cache hit:** {metrics.get('semantic_cache_hit', False)}")
+            # En cache hit el servidor no llama al LLM: no hay proveedor, modelo ni tokens
+            st.caption(f"**Proveedor:** {metrics.get('provider_used', '-')}")
+            st.caption(f"**Modelo:** {metrics.get('model_used', '-')}")
+            st.caption(f"**Versión del prompt:** {metrics['prompt_version']}")
+            st.caption(f"**Tokens entrada:** {metrics.get('tokens_input', '-')}")
+            st.caption(f"**Tokens salida:** {metrics.get('tokens_output', '-')}")
+            st.caption(f"**Tiempo:** {metrics['elapsed_seconds']:.2f} s")
+        else:
+            st.caption("Todavía no se ha generado ninguna estimación.")
+
+else:
+    # Modo conversacional (sesión 05): historial + project_metadata + adjuntos.
+    # NO reutiliza el panel de "Contexto del LLM" renderizando prompts localmente
+    # (render_estimation_prompt) porque aquí el prompt real depende del estado del servidor
+    # (historial + project_metadata de la sesión), no solo de los campos del formulario.
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = create_session_via_api()
+        st.session_state.conversation_turns = []
+
+    if st.button("Nueva conversación"):
+        st.session_state.session_id = create_session_via_api()
+        st.session_state.conversation_turns = []
+        st.rerun()
+
+    for turn in st.session_state.get("conversation_turns", []):
+        with st.chat_message(turn["role"]):
+            if turn["role"] == "assistant":
+                show_result(turn["result"], OutputFormat(turn["output_format"]))
+            else:
+                st.markdown(turn["content"])
+
+    with st.form("conversation_form", clear_on_submit=True):
+        transcript = st.text_area("Transcripción / mensaje para este turno", height=200)
+        uploaded_files = st.file_uploader(
+            "Adjuntos (opcional)", type=["pdf", "docx"], accept_multiple_files=True
+        )
+        project_type = st.selectbox("Tipo de proyecto", options=list(ProjectType), format_func=lambda p: p.value)
+        detail_level = st.selectbox("Nivel de detalle", options=list(DetailLevel), format_func=lambda d: d.value)
+        output_format = st.selectbox("Formato de salida", options=list(OutputFormat), format_func=lambda o: o.value)
+        submitted = st.form_submit_button("Enviar turno")
+
+    if submitted:
+        if len(transcript) < 20:
+            st.error("transcript: debe tener al menos 20 caracteres")
+        else:
+            try:
+                response = estimate_conversational_via_api(
+                    st.session_state.session_id, transcript, project_type, detail_level, output_format, uploaded_files
+                )
+            except httpx.HTTPStatusError as exc:
+                show_api_error(exc)
+            except httpx.HTTPError as exc:
+                st.error(f"Error al llamar al servicio IA: {exc}")
+            else:
+                st.session_state.conversation_turns.append({"role": "user", "content": transcript})
+                st.session_state.conversation_turns.append(
+                    {
+                        "role": "assistant",
+                        "result": response.result.model_dump(mode="json"),
+                        "output_format": output_format.value,
+                    }
+                )
+                st.rerun()
+
+    with st.sidebar:
+        st.header("Estado de la sesión")
+        st.caption(f"**session_id:** {st.session_state.session_id}")
+        try:
+            info = get_session_info_via_api(st.session_state.session_id)
+        except httpx.HTTPError as exc:
+            st.error(f"No se pudo leer el estado de la sesión: {exc}")
+        else:
+            st.caption(f"**Mensajes en historial:** {info['message_count']} / {info['max_turns'] * 2}")
+            st.subheader("Project metadata")
+            st.json(info["metadata"])
