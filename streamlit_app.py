@@ -8,8 +8,10 @@ from pydantic import ValidationError
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.prompts.loader import render_estimation_prompt
+from app.schemas.acb import ACBResponse
 from app.schemas.estimation import (
     OUT_OF_SCOPE_PREFIX,
+    ConversationalEstimationResponse,
     DetailLevel,
     EstimationRequest,
     EstimationResponse,
@@ -18,6 +20,9 @@ from app.schemas.estimation import (
 )
 
 configure_logging()
+
+# "auto" = sin override: el servidor resuelve el tier con sus reglas
+TIER_OPTIONS = ["auto", "executive", "pm", "developer", "default"]
 
 def estimate_via_api(request: EstimationRequest) -> EstimationResponse:
     url = f"{get_settings().API_BASE_URL}/api/v1/estimate"
@@ -93,19 +98,50 @@ def estimate_conversational_via_api(
     detail_level: DetailLevel,
     output_format: OutputFormat,
     uploaded_files: list,
-) -> EstimationResponse:
-    url = f"{get_settings().API_BASE_URL}/sessions/{session_id}/estimate"
+    tier: str = "auto",
+    use_acb: bool = False,
+) -> ConversationalEstimationResponse | ACBResponse:
+    # El modo ACB usa otro endpoint con el mismo contrato; su response añade la traza `acb`
+    endpoint = "estimate-acb" if use_acb else "estimate"
+    url = f"{get_settings().API_BASE_URL}/sessions/{session_id}/{endpoint}"
     data = {
         "transcript": transcript,
         "project_type": project_type.value,
         "detail_level": detail_level.value,
         "output_format": output_format.value,
     }
+    if tier != "auto":
+        data["tier"] = tier
     # Un único campo "attachments" repetido: así lo espera list[UploadFile] en el endpoint
     files = [("attachments", (f.name, f.getvalue(), f.type)) for f in uploaded_files]
-    response = httpx.post(url, data=data, files=files, timeout=120)
+    # El ACB encadena varias llamadas al LLM: necesita más margen que el turno normal
+    response = httpx.post(url, data=data, files=files, timeout=300 if use_acb else 120)
     response.raise_for_status()
-    return EstimationResponse.model_validate(response.json())
+    response_model = ACBResponse if use_acb else ConversationalEstimationResponse
+    return response_model.model_validate(response.json())
+
+def show_call_metrics(turn: dict) -> None:
+    # Los campos son opcionales en la response: solo se muestran los que vienen
+    parts = []
+    if turn.get("latency_ms") is not None:
+        parts.append(f"{turn['latency_ms']} ms")
+    if turn.get("tokens_in") is not None and turn.get("tokens_out") is not None:
+        parts.append(f"{turn['tokens_in']} tokens in / {turn['tokens_out']} out")
+    if turn.get("cost_usd") is not None:
+        parts.append(f"${turn['cost_usd']:.4f}")
+    if parts:
+        st.caption(" · ".join(parts))
+
+def show_acb_trace(acb: dict) -> None:
+    with st.expander(f"Traza Actor-Critic-Boss ({acb['iterations_run']} iteraciones, decisión final: {acb['final_decision']})"):
+        for iteration in acb["iterations"]:
+            st.markdown(
+                f"**Iteración {iteration['iteration']}** · veredicto del critic: `{iteration['critic_verdict']}` "
+                f"(confianza {iteration['critic_confidence']}%) · decisión del boss: `{iteration['decision_after']}`"
+            )
+            for issue in iteration["issue_summary"]:
+                st.caption(f"- {issue}")
+        st.caption(f"**Decisión final:** {acb['final_decision']}")
 
 def show_api_error(exc: httpx.HTTPStatusError) -> None:
     # Mismo formato que en el modo formulario: el 400 de los guardrails viaja como {"reason", "message"}
@@ -241,6 +277,9 @@ else:
         with st.chat_message(turn["role"]):
             if turn["role"] == "assistant":
                 show_result(turn["result"], OutputFormat(turn["output_format"]))
+                show_call_metrics(turn)
+                if turn.get("acb"):
+                    show_acb_trace(turn["acb"])
             else:
                 st.markdown(turn["content"])
 
@@ -252,6 +291,8 @@ else:
         project_type = st.selectbox("Tipo de proyecto", options=list(ProjectType), format_func=lambda p: p.value)
         detail_level = st.selectbox("Nivel de detalle", options=list(DetailLevel), format_func=lambda d: d.value)
         output_format = st.selectbox("Formato de salida", options=list(OutputFormat), format_func=lambda o: o.value)
+        tier = st.selectbox("Tier de audiencia", options=TIER_OPTIONS, help="auto = lo decide el servidor según el contexto")
+        use_acb = st.toggle("Revisión Actor-Critic-Boss", help="Más lento y caro: un critic audita cada borrador")
         submitted = st.form_submit_button("Enviar turno")
 
     if submitted:
@@ -259,9 +300,17 @@ else:
             st.error("transcript: debe tener al menos 20 caracteres")
         else:
             try:
-                response = estimate_conversational_via_api(
-                    st.session_state.session_id, transcript, project_type, detail_level, output_format, uploaded_files
-                )
+                with st.spinner("Estimando..."):
+                    response = estimate_conversational_via_api(
+                        st.session_state.session_id,
+                        transcript,
+                        project_type,
+                        detail_level,
+                        output_format,
+                        uploaded_files,
+                        tier=tier,
+                        use_acb=use_acb,
+                    )
             except httpx.HTTPStatusError as exc:
                 show_api_error(exc)
             except httpx.HTTPError as exc:
@@ -271,8 +320,9 @@ else:
                 st.session_state.conversation_turns.append(
                     {
                         "role": "assistant",
-                        "result": response.result.model_dump(mode="json"),
                         "output_format": output_format.value,
+                        # Todo lo que trae la response (resultado, métricas y, en ACB, la traza `acb`)
+                        **response.model_dump(mode="json"),
                     }
                 )
                 st.rerun()
@@ -285,8 +335,14 @@ else:
         except httpx.HTTPError as exc:
             st.error(f"No se pudo leer el estado de la sesión: {exc}")
         else:
-            # message_count cuenta mensajes (user+assistant); se divide entre 2 para mostrar pares/turnos
-            st.caption(f"**Mensajes en historial:** {info['message_count'] // 2} / {info['max_turns']}")
+            # La ventana admite max_turns pares: message_count cuenta mensajes sueltos (user + assistant)
+            st.caption(f"**Mensajes en la ventana:** {info['message_count']} / {info['max_turns'] * 2}")
+            st.caption(f"**Anclas (mensajes):** {info['anchors_count']}")
+            st.caption(f"**Resumen acumulado:** {info['summary_chars']} caracteres")
+            if info["last_resolved_tier"]:
+                st.caption(f"**Tier:** {info['last_resolved_tier']} ({info['last_tier_rule']})")
+            else:
+                st.caption("**Tier:** aún sin resolver")
             st.subheader("Project metadata")
             metadata = info["metadata"]
             metadata_fields = [

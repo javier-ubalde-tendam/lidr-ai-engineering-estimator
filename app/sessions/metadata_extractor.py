@@ -1,20 +1,21 @@
-import instructor
-import litellm
 import structlog
 
 from app.config import get_settings
 from app.prompts.loader import render_metadata_extraction_prompt
 from app.schemas.estimation import EstimationResult
+from app.services.llm_wrapper import call_structured
 from app.sessions.models import ProjectMetadata
 
 logger = structlog.get_logger(__name__)
 
-# Cliente de Instructor independiente del de llm_service: llama siempre a METADATA_EXTRACTOR_MODEL
-# (un modelo barato), sin pasar por el fallback OpenAI/Anthropic de la estimación principal
-_structured_client = instructor.from_litellm(litellm.completion)
 
-
-def update_metadata(previous: ProjectMetadata, transcript: str, result: EstimationResult) -> ProjectMetadata:
+def update_metadata(
+    previous: ProjectMetadata,
+    transcript: str,
+    result: EstimationResult,
+    *,
+    session_id: str | None = None,
+) -> ProjectMetadata:
     """Segunda llamada (barata) con Instructor que extrae hechos del turno y los fusiona con lo ya sabido.
 
     Política de fallo: si la extracción falla por cualquier motivo (red, validación, proveedor),
@@ -27,15 +28,16 @@ def update_metadata(previous: ProjectMetadata, transcript: str, result: Estimati
         estimation_summary=result.summary,
     )
     try:
-        extracted, _completion = _structured_client.create_with_completion(
-            model=settings.METADATA_EXTRACTOR_MODEL,
-            api_key=settings.OPENAI_API_KEY,
-            messages=[
+        extracted, _meta = call_structured(
+            [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            response_model=ProjectMetadata,
+            ProjectMetadata,
+            settings.METADATA_EXTRACTOR_MODEL,
             max_retries=settings.STRUCTURED_OUTPUT_MAX_RETRIES,
+            purpose="metadata_extraction",
+            session_id=session_id,
         )
     except Exception as exc:  # noqa: BLE001 - fallo intencionadamente amplio: nunca debe tumbar la conversación
         logger.warning("metadata_extraction_failed", error_type=type(exc).__name__, error=str(exc))

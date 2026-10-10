@@ -1,0 +1,16 @@
+<project_description>
+{{ description }}
+</project_description>
+
+Project type: {{ project_type }}.
+{% if critic_feedback %}
+
+<critic_feedback>
+An independent reviewer found problems in your previous draft of this estimation. Fix every issue below in the new answer and do not repeat the same mistakes.
+{% for issue in critic_feedback.issues %}
+- [{{ issue.severity }}] {{ issue.category }} at {{ issue.field_path }}: {{ issue.description }}{% if issue.suggested_fix %} (suggested fix: {{ issue.suggested_fix }}){% endif %}
+
+{% endfor %}
+</critic_feedback>
+{% endif %}
+Estimate this project following the rules above.

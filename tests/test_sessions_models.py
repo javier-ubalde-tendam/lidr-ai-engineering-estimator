@@ -1,4 +1,4 @@
-from app.sessions.models import ConversationHistory, ProjectMetadata
+from app.sessions.models import SUMMARY_PREFIX, ConversationHistory, Message, ProjectMetadata
 
 
 def test_history_append_adds_a_user_assistant_pair():
@@ -11,26 +11,42 @@ def test_history_append_adds_a_user_assistant_pair():
     assert history.messages[1].content == "here is the estimation"
 
 
-def test_trim_keeps_at_most_max_turns_pairs():
+def test_append_no_longer_trims_the_window():
     history = ConversationHistory(max_turns=2)
 
     for i in range(4):  # 4 turnos = 8 mensajes, el doble del límite (2*2=4)
         history.append(user=f"user {i}", assistant=f"assistant {i}")
 
-    assert len(history.messages) == 4
-    # Se descartan los pares más antiguos primero: solo quedan los dos últimos turnos
-    assert [m.content for m in history.messages] == ["user 2", "assistant 2", "user 3", "assistant 3"]
+    # Qué se olvida lo decide la política de compresión, no append()
+    assert len(history.messages) == 8
+    assert history.anchors == []
+    assert history.summary is None
 
 
-def test_trim_never_breaks_the_user_assistant_alternation():
-    history = ConversationHistory(max_turns=3)
+def test_to_messages_list_orders_system_summary_anchors_and_recent_window():
+    history = ConversationHistory(max_turns=2, summary="Earlier facts.")
+    history.anchors = [Message(role="user", content="anchor user"), Message(role="assistant", content="anchor reply")]
+    history.append(user="recent user", assistant="recent reply")
 
-    for i in range(10):
-        history.append(user=f"user {i}", assistant=f"assistant {i}")
+    messages = history.to_messages_list("system prompt")
 
-    roles = [m.role for m in history.messages]
-    assert roles == ["user", "assistant"] * 3
-    assert len(history.messages) == 6
+    assert [m["content"] for m in messages] == [
+        "system prompt",
+        f"{SUMMARY_PREFIX}\nEarlier facts.",
+        "anchor user",
+        "anchor reply",
+        "recent user",
+        "recent reply",
+    ]
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"].startswith("[Earlier conversation summary")
+
+
+def test_to_messages_list_omits_the_summary_message_when_there_is_no_summary():
+    history = ConversationHistory(max_turns=2)
+    history.append(user="hello", assistant="hi")
+
+    assert len(history.to_messages_list("system prompt")) == 3
 
 
 def test_to_messages_list_prepends_the_system_prompt_without_storing_it():

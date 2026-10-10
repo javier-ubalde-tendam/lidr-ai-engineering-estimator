@@ -49,3 +49,7 @@ strict = true
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Descubrimiento explícito: con reference/ en la raíz setuptools ve varios paquetes y aborta el build
+include = ["app*", "evals*"]

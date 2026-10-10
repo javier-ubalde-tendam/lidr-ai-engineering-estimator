@@ -1,0 +1,83 @@
+<examples>
+The following examples show the structure and rigour of a well-formed result: each <estimation> is exactly the object you must return. Do not copy their numbers or wording; the length of the text fields follows the detail_level rules.
+
+<example>
+<project_description>
+A data pipeline to consolidate sales data from five regional CRMs into a single warehouse. Nightly batch ingestion, schema normalisation, deduplication of customer records, and a dashboard refreshed every morning for the commercial team. No real-time requirement.
+</project_description>
+<estimation>
+{
+  "summary": "Nightly consolidation of five regional CRMs into one warehouse, with deduplicated customers and a morning dashboard. Team: 1 data engineer, 1 backend developer (part-time) and 1 analytics engineer, delivered in 14 weeks.",
+  "confidence_pct": 70,
+  "phases": [
+    {"name": "Discovery", "duration_weeks": 2, "cost_eur": 4000, "summary": "Map the schemas of the five CRMs and agree the target warehouse model."},
+    {"name": "Design", "duration_weeks": 2, "cost_eur": 4500, "summary": "Design the ingestion flow, the normalised schema and the deduplication rules."},
+    {"name": "Implementation", "duration_weeks": 7, "cost_eur": 24500, "summary": "Build the nightly ingestion, the normalisation and deduplication jobs and the dashboard."},
+    {"name": "QA", "duration_weeks": 2, "cost_eur": 5000, "summary": "Reconcile warehouse totals against each CRM and test failure recovery."},
+    {"name": "Launch", "duration_weeks": 1, "cost_eur": 2000, "summary": "Deploy to production, schedule the batches and hand over to the commercial team."}
+  ],
+  "total_duration_weeks": 14,
+  "total_cost_eur": 40000
+}
+</estimation>
+</example>
+
+<example>
+<project_description>
+Web SaaS for independent gyms to manage class bookings: member portal, class calendar with waitlists, recurring payments via Stripe, and an admin panel for instructors to track attendance. Single tenant per gym, no native mobile app for this phase.
+</project_description>
+<estimation>
+{
+  "summary": "Single-tenant booking SaaS for gyms with a member portal, waitlists, Stripe subscriptions and an instructor admin panel. Team: 1 product designer (part-time), 2 full-stack developers and 1 QA engineer (part-time), delivered in 14 weeks.",
+  "confidence_pct": 65,
+  "phases": [
+    {"name": "Discovery", "duration_weeks": 1, "cost_eur": 2500, "summary": "Clarify booking rules, waitlist behaviour and the payment plans to support."},
+    {"name": "Design", "duration_weeks": 2, "cost_eur": 4500, "summary": "Design the member portal, the class calendar and the admin panel."},
+    {"name": "Implementation", "duration_weeks": 8, "cost_eur": 27000, "summary": "Build bookings, waitlists, Stripe recurring payments and attendance tracking."},
+    {"name": "QA", "duration_weeks": 2, "cost_eur": 5000, "summary": "Test booking edge cases, payment failures and the admin flows."},
+    {"name": "Launch", "duration_weeks": 1, "cost_eur": 2000, "summary": "Deploy the first gym, migrate its members and monitor the first week."}
+  ],
+  "total_duration_weeks": 14,
+  "total_cost_eur": 41000
+}
+</estimation>
+</example>
+
+<example>
+<project_description>
+Internal tool for a logistics company to triage and route customer support tickets: shared inbox integrated with the existing helpdesk email, rule-based auto-assignment by region, SLA countdown per ticket, and a weekly summary report for team leads.
+</project_description>
+<estimation>
+{
+  "summary": "Internal ticket triage tool with a shared inbox, regional auto-assignment, SLA countdowns and a weekly report. Team: 1 backend developer, 1 full-stack developer and 1 QA engineer (part-time), delivered in 9 weeks.",
+  "confidence_pct": 75,
+  "phases": [
+    {"name": "Discovery", "duration_weeks": 1, "cost_eur": 2000, "summary": "Review the helpdesk email setup, the regions and the SLA policies."},
+    {"name": "Design", "duration_weeks": 1, "cost_eur": 2000, "summary": "Define the assignment rules, the ticket views and the report layout."},
+    {"name": "Implementation", "duration_weeks": 5, "cost_eur": 15500, "summary": "Build the inbox integration, auto-assignment, SLA countdown and the weekly report."},
+    {"name": "QA", "duration_weeks": 1, "cost_eur": 2000, "summary": "Test routing rules and SLA timers against real ticket samples."},
+    {"name": "Launch", "duration_weeks": 1, "cost_eur": 1500, "summary": "Roll out to the support teams region by region and train the team leads."}
+  ],
+  "total_duration_weeks": 9,
+  "total_cost_eur": 23000
+}
+</estimation>
+</example>
+
+<example>
+<project_description>
+I want something like Uber but better, details to be defined later.
+</project_description>
+<estimation>
+{
+  "summary": "Out of scope: the description names no domain, features or constraints, so it cannot be sized with any reliability.",
+  "confidence_pct": 15,
+  "phases": [
+    {"name": "Not estimated", "duration_weeks": 1, "cost_eur": 0, "summary": "Cannot be sized without more information."}
+  ],
+  "total_duration_weeks": 1,
+  "total_cost_eur": 0
+}
+</estimation>
+</example>
+</examples>

@@ -1,5 +1,6 @@
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import instructor
@@ -11,7 +12,7 @@ from pydantic import ValidationError
 
 from app.attachments.extractor import enrich_transcript
 from app.cache import build_cache_key, get_cached_estimation, set_cached_estimation
-from app.config import estimate_cost_usd, get_settings
+from app.config import get_settings
 from app.dependencies import get_openai_client
 from app.guardrails.input import check_input
 from app.guardrails.output import enforce_scope_response
@@ -21,6 +22,8 @@ from app.prompts.loader import (
     render_conversational_user,
     render_estimation_prompt,
 )
+from app.schemas.acb import BossTrace
+from app.schemas.critic import CriticFeedback
 from app.schemas.estimation import (
     DetailLevel,
     EstimationRequest,
@@ -29,14 +32,24 @@ from app.schemas.estimation import (
     ProjectType,
 )
 from app.semantic_cache import semantic_cache_lookup, semantic_cache_store
+from app.services import critic as critic_service
+from app.services.boss import Boss
+from app.services.llm_wrapper import (
+    LLMCallMeta,
+    call_structured,
+    error_type,
+    estimate_cost_usd,
+    normalise_model_name,
+    provider_from_model,
+    sum_call_metas,
+)
+from app.sessions.compression import apply_compression
 from app.sessions.metadata_extractor import update_metadata
 from app.sessions.models import Session
+from app.sessions.tier_resolver import Tier, resolve_tier
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
-
-# Envuelve litellm.completion: añade response_model y reintentos con el error de validación
-_structured_client = instructor.from_litellm(litellm.completion)
 
 
 class EstimationFailedError(Exception):
@@ -57,29 +70,9 @@ def _other_provider(provider: str) -> str:
     return "anthropic" if provider == "openai" else "openai"
 
 
-def _bare_model_name(model: str) -> str:
-    # Quita el prefijo "anthropic/" que exige LiteLLM para enrutar, para que coincida con la tabla de precios
-    return model.removeprefix("anthropic/")
-
-
 def _shorten(text: str, max_chars: int = 25) -> str:
     # Solo añade "..." si realmente se recorta, para no sugerir texto omitido que no existe
     return text if len(text) <= max_chars else f"{text[:max_chars]}..."
-
-
-def _error_type(error: BaseException | None) -> str:
-    # Instructor envuelve el error original en InstructorRetryException: se clasifica por su causa
-    if isinstance(error, AuthenticationError):
-        return "auth"
-    if isinstance(error, RateLimitError):
-        return "rate_limit"
-    if isinstance(error, Timeout):
-        return "timeout"
-    if isinstance(error, APIError):
-        return "server_error"
-    if isinstance(error, ValidationError):
-        return "invalid_output"
-    return "unknown"
 
 
 def _totals_warnings(result: EstimationResult) -> list[str]:
@@ -90,25 +83,22 @@ def _totals_warnings(result: EstimationResult) -> list[str]:
     return [f"totals_match_phases: {mismatch}"]
 
 
-def _call_structured_estimation(messages: list[dict], model: str, **log_context: Any) -> tuple[EstimationResult, Any]:
+def _call_estimation(
+    messages: list[dict], model: str, *, purpose: str = "estimation", **log_context: Any
+) -> tuple[EstimationResult, LLMCallMeta]:
     # messages es un array arbitrario: [system, user] en el flujo clásico, o
-    # [system, *historial, user] en el conversacional; log_context añade claves extra al log de fallo
+    # [system, resumen, anclas, ventana, user] en el conversacional
     try:
-        return _structured_client.create_with_completion(
-            model=model,
-            api_key=_api_key_for_provider(settings.LLM_PROVIDER),
-            messages=messages,
-            response_model=EstimationResult,
+        return call_structured(
+            messages,
+            EstimationResult,
+            model,
             max_retries=settings.STRUCTURED_OUTPUT_MAX_RETRIES,
-        )
-    except InstructorRetryException as exc:
-        logger.error(
-            "llm_call_failed",
-            error_type=_error_type(exc.__cause__),
-            error=str(exc.__cause__),
-            attempts=exc.n_attempts,
+            purpose=purpose,
             **log_context,
         )
+    except InstructorRetryException as exc:
+        # call_structured ya registró llm_call_failed con el detalle
         raise EstimationFailedError("No valid estimation after retries") from exc
 
 
@@ -134,25 +124,13 @@ def estimate_project(request: EstimationRequest) -> tuple[EstimationResult, int,
         prompt_version=settings.PROMPT_VERSION,
     )
 
-    start = time.perf_counter()
-    result, completion = _call_structured_estimation(messages, model)
+    # Con reintentos Instructor acumula los tokens de todos los intentos en el meta
+    result, meta = _call_estimation(messages, model)
 
     _totals_warnings(result)  # sin reintento por totales: solo queda registrado en el log
     result = enforce_scope_response(result)  # red de seguridad si el model_validator no disparó
-    latency_ms = (time.perf_counter() - start) * 1000
-    usage = completion.usage  # con reintentos Instructor acumula los tokens de todos los intentos
-    tokens_output = usage.completion_tokens if usage else 0
-    tokens_input = usage.prompt_tokens if usage else 0
 
-    logger.info(
-        "llm_call_completed",
-        tokens_output=tokens_output,
-        latency_ms=round(latency_ms, 2),
-        cost_usd=estimate_cost_usd(_bare_model_name(model), tokens_input, tokens_output),
-        finish_reason=completion.choices[0].finish_reason,
-    )
-
-    return (result, tokens_input, tokens_output, _bare_model_name(model))
+    return (result, meta.tokens_in, meta.tokens_out, meta.model)
 
 
 def _with_attachment_reference(transcript: str, attachment_filenames: list[str]) -> str:
@@ -164,6 +142,78 @@ def _with_attachment_reference(transcript: str, attachment_filenames: list[str])
     return f"{transcript}\n\n(Attachments uploaded in this turn: {names})"
 
 
+# --- Pasos compartidos por el flujo conversacional y el ACB ---
+
+
+@dataclass
+class _Turn:
+    session: Session
+    transcript: str  # lo que escribió el usuario, sin el texto de los adjuntos
+    enriched_transcript: str  # transcript + adjuntos: es lo que ven guardrails, tier, prompt y metadata
+    attachment_filenames: list[str]
+    project_type: ProjectType
+    detail_level: DetailLevel
+    tier: Tier
+
+
+def _prepare_turn(
+    session: Session,
+    transcript: str,
+    attachments: list[tuple[str, str]],
+    project_type: ProjectType,
+    detail_level: DetailLevel,
+    tier_override: Tier | None,
+) -> _Turn:
+    """Pasos 1-2: guardrail de input y tier."""
+    enriched_transcript = enrich_transcript(transcript=transcript, attachments=attachments)
+    # El contenido de un adjunto es input no confiable (posible prompt injection): mismo guardrail
+    check_input(enriched_transcript, openai_client=get_openai_client())
+
+    # Se resuelve ANTES de renderizar el prompt, con el metadata acumulado hasta el turno anterior
+    tier, rule = resolve_tier(
+        transcript=enriched_transcript, metadata=session.metadata, override=tier_override
+    )
+    session.last_resolved_tier = tier.value
+    session.last_tier_rule = rule
+    return _Turn(
+        session=session,
+        transcript=transcript,
+        enriched_transcript=enriched_transcript,
+        attachment_filenames=[filename for filename, _ in attachments],
+        project_type=project_type,
+        detail_level=detail_level,
+        tier=tier,
+    )
+
+
+def _build_messages(turn: _Turn, critic_feedback: CriticFeedback | None) -> list[dict]:
+    """Pasos 3-4: render del prompt y messages = system + resumen + anclas + ventana + user."""
+    system_prompt, user_prompt = render_conversational_prompt(
+        transcript=turn.enriched_transcript,
+        project_type=turn.project_type.value,
+        detail_level=turn.detail_level.value,
+        metadata=turn.session.metadata,
+        tier=turn.tier.value,
+        critic_feedback=critic_feedback,
+    )
+    return [*turn.session.history.to_messages_list(system_prompt), {"role": "user", "content": user_prompt}]
+
+
+def _commit_turn(turn: _Turn, result: EstimationResult) -> None:
+    """Pasos 7-9: historial, compresión y metadata."""
+    # Se guarda el user prompt SIN critic_feedback y con los adjuntos como referencia
+    history_user_content = render_conversational_user(
+        transcript=_with_attachment_reference(turn.transcript, turn.attachment_filenames),
+        project_type=turn.project_type.value,
+    )
+    turn.session.history.append(user=history_user_content, assistant=result.model_dump_json())
+    # append() ya no recorta: la compresión es la única que decide qué se olvida
+    apply_compression(turn.session.history)
+    turn.session.metadata = update_metadata(
+        turn.session.metadata, turn.enriched_transcript, result, session_id=turn.session.session_id
+    )
+
+
 def estimate_conversational(
     session: Session,
     transcript: str,
@@ -171,7 +221,8 @@ def estimate_conversational(
     project_type: ProjectType,
     detail_level: DetailLevel,
     output_format: OutputFormat,
-) -> EstimationResult:
+    tier: Tier | None = None,
+) -> tuple[EstimationResult, LLMCallMeta]:
     """Turno conversacional: usa el historial de la sesión y el project_metadata acumulado.
 
     A diferencia de estimate_project(), NO consulta ni escribe la cache exact-match ni la
@@ -179,64 +230,97 @@ def estimate_conversational(
     cache actual (system + user) no los tiene en cuenta, así que daría hits incorrectos entre
     sesiones distintas (o entre turnos de la misma sesión).
     """
-    enriched_transcript = enrich_transcript(transcript=transcript, attachments=attachments)
-    # El contenido de un adjunto es input no confiable (posible prompt injection): mismo guardrail
-    check_input(enriched_transcript, openai_client=get_openai_client())
-
-    system_prompt, user_prompt = render_conversational_prompt(
-        transcript=enriched_transcript,
-        project_type=project_type.value,
-        detail_level=detail_level.value,
-        metadata=session.metadata,
-    )
-    history_messages = session.history.to_messages_list(system_prompt)
-    messages = [*history_messages, {"role": "user", "content": user_prompt}]
+    turn = _prepare_turn(session, transcript, attachments, project_type, detail_level, tier)
+    messages = _build_messages(turn, critic_feedback=None)
 
     model = _model_name_for_provider(settings.LLM_PROVIDER)
-    tokens_input_estimated = len(system_prompt + user_prompt) // 4
     logger.info(
         "llm_call_started",
         model_requested=model,
         provider=settings.LLM_PROVIDER,
-        tokens_input_estimated=tokens_input_estimated,
+        tokens_input_estimated=sum(len(m["content"]) for m in messages) // 4,
         session_id=session.session_id,
-        history_messages=len(history_messages),
+        history_messages=len(messages) - 2,  # sin el system ni el user actual
+        tier=turn.tier.value,
         detail_level=detail_level.value,
         output_format=output_format.value,
         prompt_version=settings.CONVERSATIONAL_PROMPT_VERSION,
     )
 
-    start = time.perf_counter()
-    result, completion = _call_structured_estimation(
-        messages, model, session_id=session.session_id, history_messages=len(history_messages)
-    )
+    result, meta = _call_estimation(messages, model, session_id=session.session_id)
 
     _totals_warnings(result)
     result = enforce_scope_response(result)
-    latency_ms = (time.perf_counter() - start) * 1000
-    usage = completion.usage
-    tokens_output = usage.completion_tokens if usage else 0
-    tokens_input = usage.prompt_tokens if usage else 0
+    _commit_turn(turn, result)
+    return result, meta
 
+
+def estimate_with_acb(
+    session: Session,
+    transcript: str,
+    attachments: list[tuple[str, str]],
+    project_type: ProjectType,
+    detail_level: DetailLevel,
+    output_format: OutputFormat,
+    tier: Tier | None = None,
+) -> tuple[EstimationResult, BossTrace, LLMCallMeta]:
+    """Variante Actor-Critic-Boss del turno conversacional.
+
+    Cuesta hasta 2 * BOSS_MAX_ITERATIONS llamadas (actor + critic por vuelta). Los borradores
+    intermedios son desechables: la sesión solo recibe el resultado final, así que para el
+    usuario el turno produce exactamente un mensaje del assistant.
+    """
+    turn = _prepare_turn(session, transcript, attachments, project_type, detail_level, tier)
+    model = _model_name_for_provider(settings.LLM_PROVIDER)
+    session_id = session.session_id
     logger.info(
-        "llm_call_completed",
-        tokens_output=tokens_output,
-        latency_ms=round(latency_ms, 2),
-        cost_usd=estimate_cost_usd(_bare_model_name(model), tokens_input, tokens_output),
-        finish_reason=completion.choices[0].finish_reason,
-        session_id=session.session_id,
-        history_messages=len(history_messages),
+        "acb_started",
+        session_id=session_id,
+        tier=turn.tier.value,
+        model_requested=model,
+        critic_model=settings.CRITIC_MODEL,
+        max_iterations=settings.BOSS_MAX_ITERATIONS,
+        output_format=output_format.value,
+        prompt_version=settings.CONVERSATIONAL_PROMPT_VERSION,
     )
 
-    attachment_filenames = [filename for filename, _ in attachments]
-    history_user_content = render_conversational_user(
-        transcript=_with_attachment_reference(transcript, attachment_filenames),
-        project_type=project_type.value,
-    )
-    session.history.append(user=history_user_content, assistant=result.model_dump_json())
-    session.metadata = update_metadata(session.metadata, enriched_transcript, result)
+    actor_metas: list[LLMCallMeta] = []
+    critic_metas: list[LLMCallMeta] = []
 
-    return result
+    def actor(critic_feedback: CriticFeedback | None) -> EstimationResult:
+        # Se re-renderiza en cada vuelta para que el feedback del critic entre en el user prompt
+        draft, meta = _call_estimation(
+            _build_messages(turn, critic_feedback),
+            model,
+            purpose="acb_actor",
+            session_id=session_id,
+            iteration=len(actor_metas),
+        )
+        actor_metas.append(meta)
+        return draft
+
+    def critic(draft: EstimationResult) -> CriticFeedback:
+        feedback, meta = critic_service.review(
+            turn.enriched_transcript,
+            session.metadata,
+            turn.tier,
+            draft,
+            session_id=session_id,
+            iteration=len(critic_metas),
+        )
+        if meta is not None:  # None = el critic falló y se aceptó el borrador (fail-open)
+            critic_metas.append(meta)
+        return feedback
+
+    result, trace = Boss(settings.BOSS_MAX_ITERATIONS).run(actor, critic)
+    total_meta = sum_call_metas([*actor_metas, *critic_metas])
+    trace.llm_usage = total_meta
+
+    _totals_warnings(result)
+    result = enforce_scope_response(result)
+    _commit_turn(turn, result)
+    return result, trace, total_meta
+
 
 # Versión con streaming, para la UI de Streamlit. Es un generador (yield en vez de return): la función no ejecuta nada hasta que alguien empieza a iterarla
 def _simulate_stream_chunks(text: str, chunk_size: int = 20) -> Iterator[str]:
@@ -258,8 +342,8 @@ def _tool_json_fragments(stream: Iterator[Any], provider: str, model: str, stats
         # Comprobado con logs reales: chunk.model siempre es el nombre pedido, no un snapshot fechado
         # distinto (a diferencia de lo que asumíamos antes sin verificarlo). LiteLLM no expone aquí
         # el snapshot exacto resuelto por el proveedor.
-        stats["model_requested"] = _bare_model_name(model)
-        stats["model_used"] = _bare_model_name(getattr(chunk, "model", model))
+        stats["model_requested"] = normalise_model_name(model)
+        stats["model_used"] = normalise_model_name(getattr(chunk, "model", model))
 
         if chunk.choices:
             # Con tool calling el JSON viaja en tool_calls[0].function.arguments, no en delta.content
@@ -361,19 +445,20 @@ def _get_cached_result(cache_key: str) -> EstimationResult | None:
 
 
 def _log_llm_call_completed(stats: dict, start: float) -> None:
-    latency_ms = (time.perf_counter() - start) * 1000
+    # Mismos seis campos que call_structured, para poder agregar coste y latencia de ambos caminos
+    model = stats.get("model_requested", "")
+    tokens_in = stats.get("tokens_input", 0)
+    tokens_out = stats.get("tokens_output", 0)
     logger.info(
         "llm_call_completed",
-        tokens_input=stats.get("tokens_input", 0),
-        tokens_output=stats.get("tokens_output", 0),
-        latency_ms=round(latency_ms, 2),
-        cost_usd=estimate_cost_usd(
-            stats.get("model_requested", ""),
-            stats.get("tokens_input", 0),
-            stats.get("tokens_output", 0),
-        ),
+        latency_ms=int((time.perf_counter() - start) * 1000),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=estimate_cost_usd(model, tokens_in, tokens_out),
+        model=normalise_model_name(model),
+        provider=stats.get("provider_used") or provider_from_model(model),
+        purpose="estimation_stream",
         finish_reason=stats.get("finish_reason"),
-        provider_used=stats.get("provider_used"),
         fallback_used=stats.get("fallback_used", False),
     )
 
@@ -422,10 +507,13 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
             yield "partial", state
         logger.info(
             "llm_call_completed",
-            tokens_input=0,
-            tokens_output=0,
-            latency_ms=round((time.perf_counter() - start) * 1000, 2),
+            latency_ms=int((time.perf_counter() - start) * 1000),
+            tokens_in=0,
+            tokens_out=0,
             cost_usd=0.0,
+            model="cache",
+            provider="cache",
+            purpose="estimation_stream",
             finish_reason="cache_hit",
         )
         yield "complete", cached_result
@@ -446,7 +534,7 @@ def estimate_project_stream_structured(request: EstimationRequest, stats: dict) 
             "llm_call_attempt_failed",
             attempt="stream_final_validation",
             provider=stats["provider_used"],
-            error_type=_error_type(exc),
+            error_type=error_type(exc),
             error=str(exc),
         )
         # Política de fallo: se descartan los parciales y se reintenta con Instructor bloqueante

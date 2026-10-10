@@ -67,3 +67,13 @@ class EstimationResponse(BaseModel):
     result: EstimationResult
     prompt_version: str
     cached: bool = False
+
+
+class ConversationalEstimationResponse(EstimationResponse):
+    # Observabilidad de la llamada; opcionales para no romper a clientes que ya consumen EstimationResponse
+    latency_ms: int | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    cost_usd: float | None = None
+    model: str | None = None
+    provider: str | None = None

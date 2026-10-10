@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,13 +15,21 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 1
     STRUCTURED_OUTPUT_MAX_RETRIES: int = 2
     PROMPT_VERSION: str = "v2"
-    CONVERSATIONAL_PROMPT_VERSION: str = "v3"
+    CONVERSATIONAL_PROMPT_VERSION: str = "v4"
     # Pares user+assistant que conserva la ventana deslizante del historial conversacional
     MAX_CONVERSATION_TURNS: int = 6
     # Límite de caracteres por adjunto extraído (trunca, no rechaza)
     MAX_ATTACHMENT_CHARS: int = 60000
     # Modelo barato para la segunda llamada (Instructor) que extrae el project_metadata
     METADATA_EXTRACTOR_MODEL: str = "gpt-4o-mini"
+    # "heuristic" = regex sin coste; "llm" = clasificador binario (una llamada barata por turno expulsado)
+    ANCHOR_DETECTION_MODE: Literal["heuristic", "llm"] = "heuristic"
+    # Modelo barato para el resumen acumulativo y el clasificador de anclas
+    COMPRESSION_MODEL: str = "gpt-4o-mini"
+    # Modelo del critic del Actor-Critic-Boss (auditor independiente del actor)
+    CRITIC_MODEL: str = "gpt-4o-mini"
+    # 1 borrador + 2 reintentos dirigidos; con 2 el actor a menudo no puede resolver todos los issues
+    BOSS_MAX_ITERATIONS: int = 3
     APP_ENV: str = "development"
     LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -51,19 +61,3 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
-
-# Precios aproximados en USD por cada 1M de tokens. Referencia: pricing pages de OpenAI/Anthropic.
-# Ojo: cambian con el tiempo, revisar periódicamente
-MODEL_PRICING_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4o": {"input": 2.50, "output": 10.00},
-    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
-    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
-}
-
-
-def estimate_cost_usd(model: str, tokens_input: int, tokens_output: int) -> float | None:
-    pricing = MODEL_PRICING_USD_PER_1M_TOKENS.get(model)
-    if pricing is None:
-        return None
-    return (tokens_input * pricing["input"] + tokens_output * pricing["output"]) / 1_000_000

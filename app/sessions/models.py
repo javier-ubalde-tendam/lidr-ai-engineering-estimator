@@ -13,31 +13,39 @@ class Message(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+SUMMARY_PREFIX = "[Earlier conversation summary — the recent turns below are the live thread]"
+
+
 class ConversationHistory(BaseModel):
-    """Ventana deslizante de mensajes user/assistant, sin el system prompt."""
+    """Memoria híbrida: resumen acumulativo + anclas literales + ventana reciente (sin system prompt)."""
 
     max_turns: int
     messages: list[Message] = Field(default_factory=list)
+    # Pares user/assistant con un compromiso duradero (NDA, alcance congelado...): nunca se olvidan
+    anchors: list[Message] = Field(default_factory=list)
+    # Resumen de los turnos expulsados de la ventana que no eran anclas
+    summary: str | None = None
 
     def append(self, *, user: str, assistant: str) -> None:
-        # Siempre se añaden en pareja: así nunca queda un user sin su assistant (o viceversa)
+        # Siempre se añaden en pareja: así nunca queda un user sin su assistant (o viceversa).
+        # No recorta: qué se olvida lo decide en exclusiva la política de compresión
         self.messages.append(Message(role="user", content=user))
         self.messages.append(Message(role="assistant", content=assistant))
-        self._trim()
-
-    def _trim(self) -> None:
-        limit = self.max_turns * 2
-        if len(self.messages) <= limit:
-            return
-        # Se descarta siempre de dos en dos (pares completos) para no romper la alternancia user/assistant
-        excess_pairs = (len(self.messages) - limit + 1) // 2
-        del self.messages[: excess_pairs * 2]
 
     def to_messages_list(self, system_prompt: str) -> list[dict]:
-        # El system prompt se regenera cada turno a partir del metadata actual: nunca se guarda aquí
-        return [{"role": "system", "content": system_prompt}] + [
-            {"role": m.role, "content": m.content} for m in self.messages
-        ]
+        """Orden: system, resumen, anclas, ventana reciente.
+
+        De lo más antiguo y comprimido a lo más reciente y literal: el modelo da más peso a lo
+        último que lee, así que el hilo vivo va al final y el resumen (lo menos fiable) al principio.
+        El resumen viaja como mensaje user y no en el system prompt porque éste se regenera cada
+        turno desde el metadata y es lo que fija las reglas de la estimación.
+        """
+        messages = [{"role": "system", "content": system_prompt}]
+        if self.summary:
+            messages.append({"role": "user", "content": f"{SUMMARY_PREFIX}\n{self.summary}"})
+        messages += [{"role": m.role, "content": m.content} for m in self.anchors]
+        messages += [{"role": m.role, "content": m.content} for m in self.messages]
+        return messages
 
 
 class ProjectMetadata(BaseModel):
@@ -78,3 +86,6 @@ class Session(BaseModel):
     history: ConversationHistory
     metadata: ProjectMetadata = Field(default_factory=ProjectMetadata)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Último tier resuelto y la regla que lo decidió (para depuración y para el panel de Streamlit)
+    last_resolved_tier: str | None = None
+    last_tier_rule: str | None = None

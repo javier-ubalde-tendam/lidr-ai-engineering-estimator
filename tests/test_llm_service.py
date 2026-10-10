@@ -16,7 +16,7 @@ from app.cache import build_cache_key
 from app.guardrails.input import InputGuardrailViolation
 from app.prompts.loader import render_estimation_prompt
 from app.schemas.estimation import EstimationRequest, EstimationResult
-from app.services import llm_service
+from app.services import llm_service, llm_wrapper
 from app.services.llm_service import (
     EstimationFailedError,
     estimate_project,
@@ -94,7 +94,7 @@ def use_fake_llm(monkeypatch, payloads: list[dict] | None = None, error: Excepti
             raise error
         return tool_call_response(payloads[min(len(calls) - 1, len(payloads) - 1)])
 
-    monkeypatch.setattr(llm_service, "_structured_client", instructor.from_litellm(fake_completion))
+    monkeypatch.setattr(llm_wrapper, "_structured_client", instructor.from_litellm(fake_completion))
     return calls
 
 
