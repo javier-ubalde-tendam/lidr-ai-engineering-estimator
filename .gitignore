@@ -29,3 +29,6 @@ build/
 # Editor / OS
 .DS_Store
 Thumbs.db
+
+# Directorios de referencia (como por ejemplo solución del profesor)
+reference/

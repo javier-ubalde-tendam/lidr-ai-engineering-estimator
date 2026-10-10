@@ -10,7 +10,7 @@ Se añade:
      - examples.j2 : dos o tres ejemplos few-shot de estimaciones bien formadas
      - loader      : resuelve versión y renderiza
 - JSON estructurado en la salida del LLM: EstimationResult + Instructor para salida estructurada
-- Guardrails: input (moderation + injection), scope en prompt, validators de output, política de fallo declarada por guardrail
+- Guardrails: input (moderation + injection), scope en prompt, validators de output, política de fallo declarada por guardrail. Usamos la librería Instructor: es la pieza que convierte la respuesta del LLM en un objeto Pydantic validado. Es guardrail de formato y, mediante los validators, también de parte de las reglas de negocio
 - Cache semántico con Redis/redisvl, bucket + embedding, solo tras guardrails, log-only primero
 
 

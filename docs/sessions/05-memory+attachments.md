@@ -4,7 +4,7 @@
 
 Se añade:
 - Memoria conversacional en el servicio IA: sesiones en memoria del proceso (`app/sessions/`),
-  con un historial de mensajes (ventana deslizante) y un `project_metadata` acumulado.
+  con un historial de mensajes (ventana deslizante) y un `project_metadata` acumulado que no se pierde durante la conversación (siempre se mantiene). El objeto `project_metadata` contiene el nombre del proyecto, tecnologías, etc. y se va enriquecienco y completando con cada turno.
 - Adjuntos (`.pdf`, `.docx`) extraídos localmente (Camino B) y enviados como texto dentro del prompt.
 - Nuevo endpoint `POST /sessions/{session_id}/estimate` (multipart/form-data, bloqueante) que
   usa el historial + metadata de la sesión para mantener coherencia entre turnos.
