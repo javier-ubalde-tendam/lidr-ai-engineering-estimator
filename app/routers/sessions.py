@@ -12,8 +12,8 @@ from app.dependencies import get_session_store
 from app.guardrails.input import InputGuardrailViolation
 from app.schemas.acb import ACBResponse
 from app.schemas.estimation import (
-    ConversationalEstimationResponse,
     DetailLevel,
+    ObservedEstimationResponse,
     OutputFormat,
     ProjectType,
 )
@@ -73,6 +73,32 @@ def get_session(session_id: str, store: SessionStore = Depends(get_session_store
     )
 
 
+class SessionMemorySnapshot(BaseModel):
+    """Lo que la sesión recuerda fuera de la ventana: resumen, anclas (texto literal) y metadata."""
+
+    session_id: str
+    summary: str | None
+    anchors: list[str]
+    metadata: ProjectMetadata
+
+
+@router.get("/sessions/{session_id}/memory", response_model=SessionMemorySnapshot)
+def get_session_memory(
+    session_id: str, store: SessionStore = Depends(get_session_store)
+) -> SessionMemorySnapshot:
+    # Endpoint de depuración/evals: expone contenido de la conversación, no debería existir en producción
+    try:
+        session = store.get_or_404(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="session_not_found") from exc
+    return SessionMemorySnapshot(
+        session_id=session.session_id,
+        summary=session.history.summary,
+        anchors=[message.content for message in session.history.anchors],
+        metadata=session.metadata,
+    )
+
+
 async def _load_session_and_attachments(
     session_id: str, attachments: list[UploadFile], store: SessionStore
 ) -> tuple[Session, list[tuple[str, str]]]:
@@ -96,7 +122,7 @@ async def _load_session_and_attachments(
     return session, extracted_attachments
 
 
-@router.post("/sessions/{session_id}/estimate", response_model=ConversationalEstimationResponse)
+@router.post("/sessions/{session_id}/estimate", response_model=ObservedEstimationResponse)
 async def create_session_estimation(
     session_id: str,
     transcript: str = Form(..., min_length=20, max_length=_TRANSCRIPT_MAX_LENGTH),
@@ -108,11 +134,11 @@ async def create_session_estimation(
     tier: Tier | None = Form(default=None),
     attachments: list[UploadFile] = File(default_factory=list),
     store: SessionStore = Depends(get_session_store),
-) -> ConversationalEstimationResponse:
+) -> ObservedEstimationResponse:
     session, extracted_attachments = await _load_session_and_attachments(session_id, attachments, store)
 
     try:
-        result, meta = estimate_conversational(
+        result, meta, observation = estimate_conversational(
             session=session,
             transcript=transcript,
             attachments=extracted_attachments,
@@ -126,10 +152,11 @@ async def create_session_estimation(
     except EstimationFailedError as exc:
         raise HTTPException(status_code=502, detail="The LLM did not return a valid estimation") from exc
 
-    return ConversationalEstimationResponse(
+    return ObservedEstimationResponse(
         result=result,
         prompt_version=get_settings().CONVERSATIONAL_PROMPT_VERSION,
         cached=False,
+        turn_observation=observation,
         **meta.model_dump(),
     )
 

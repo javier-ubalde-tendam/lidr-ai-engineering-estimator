@@ -20,6 +20,11 @@ class MetricResult:
     passed: bool
     details: str
 
+    @property
+    def score(self) -> float:
+        # Las métricas son binarias: el score es derivado, no un campo más que mantener coherente
+        return 1.0 if self.passed else 0.0
+
 
 def _parse(payload: dict[str, Any]) -> EstimationResult | None:
     try:

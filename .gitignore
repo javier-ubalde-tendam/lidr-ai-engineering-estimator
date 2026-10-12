@@ -32,3 +32,6 @@ Thumbs.db
 
 # Directorios de referencia (como por ejemplo solución del profesor)
 reference/
+
+# PDFs sintéticos del stress test (se regeneran con evals.stress.fixtures.build_pdfs)
+evals/stress/fixtures/generated/

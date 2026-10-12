@@ -86,7 +86,8 @@ streamlit_app.py                          Cliente: formulario (stream) y convers
 | `POST` | `/api/v1/estimate/stream` | Igual que arriba, pero con streaming de la respuesta (SSE) |
 | `POST` | `/sessions` | Crea una sesión conversacional nueva |
 | `GET` | `/sessions/{session_id}` | Debug de la sesión: `message_count`, `max_turns`, `metadata`, `anchors_count`, `summary_chars`, `last_resolved_tier`, `last_tier_rule` |
-| `POST` | `/sessions/{session_id}/estimate` | Turno conversacional (multipart/form-data: adjuntos `.pdf`/`.docx` y `tier` opcional). Devuelve además `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `model`, `provider` |
+| `GET` | `/sessions/{session_id}/memory` | Snapshot de depuración de lo que recuerda la sesión: `summary`, `anchors` (texto literal) y `metadata` (lo usan los evals de estrés) |
+| `POST` | `/sessions/{session_id}/estimate` | Turno conversacional (multipart/form-data: adjuntos `.pdf`/`.docx` y `tier` opcional). Devuelve además `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `model`, `provider` y `turn_observation` (evento `turn_observed`) |
 | `POST` | `/sessions/{session_id}/estimate-acb` | Igual que `/estimate`, pero revisado por Actor-Critic-Boss; añade `acb` (traza). Cuesta hasta `2 × BOSS_MAX_ITERATIONS` llamadas al LLM |
 | `GET` | `/health` | Healthcheck |
 
@@ -117,6 +118,17 @@ uv run python -m evals.run --mode actor --http http://localhost:8000 --output re
 
 Detalle en [docs/sessions/05-memory+attachments.md](docs/sessions/05-memory+attachments.md#post-live-alinear-solución-con-el-profesor).
 
+### Stress test del CAG (ejercicio previo a la sesión 6)
+
+> **Aviso:** también llama al LLM real en cada turno (990 turnos la matriz completa). Empieza con `--max-turns 5`.
+
+```
+uv run python -m evals.stress.fixtures.build_pdfs
+uv run python -m evals.stress.run --http http://localhost:8000 --scenarios growing,pivot,contradiction --attachment-sizes 0,5,20,50,100 --repeats 3 --output evals/stress/results.csv
+```
+
+Detalle y cómo leer el CSV en [docs/sessions/06-stress-cag.md](docs/sessions/06-stress-cag.md); el informe a rellenar está en [evals/stress/REPORT.md](evals/stress/REPORT.md).
+
 ## Documentación por sesión
 
 - [docs/sessions/02-cag.md](docs/sessions/02-cag.md)
@@ -124,6 +136,7 @@ Detalle en [docs/sessions/05-memory+attachments.md](docs/sessions/05-memory+atta
 - [docs/sessions/04-form+guardrails.md](docs/sessions/04-form+guardrails.md)
 - [docs/sessions/05-memory+attachments.md](docs/sessions/05-memory+attachments.md)
   (incluye [Post-live: alinear solución con el profesor](docs/sessions/05-memory+attachments.md#post-live-alinear-solución-con-el-profesor))
+- [docs/sessions/06-stress-cag.md](docs/sessions/06-stress-cag.md)
 
 ## Sesión 05: memoria + adjuntos
 

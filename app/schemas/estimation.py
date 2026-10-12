@@ -1,6 +1,8 @@
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.observation import TurnObservation
+
 
 class ProjectType(str, Enum):
     MOBILE_APP = "mobile_app"
@@ -77,3 +79,8 @@ class ConversationalEstimationResponse(EstimationResponse):
     cost_usd: float | None = None
     model: str | None = None
     provider: str | None = None
+
+
+class ObservedEstimationResponse(ConversationalEstimationResponse):
+    # Solo /estimate: el ACB hereda de ConversationalEstimationResponse y no lo expone
+    turn_observation: TurnObservation | None = None

@@ -89,3 +89,5 @@ class Session(BaseModel):
     # Último tier resuelto y la regla que lo decidió (para depuración y para el panel de Streamlit)
     last_resolved_tier: str | None = None
     last_tier_rule: str | None = None
+    # Turnos conversacionales confirmados (los que llegaron a history.append)
+    turn_count: int = 0

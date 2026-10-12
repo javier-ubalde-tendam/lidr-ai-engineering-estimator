@@ -31,6 +31,7 @@ from app.schemas.estimation import (
     OutputFormat,
     ProjectType,
 )
+from app.schemas.observation import TurnObservation
 from app.semantic_cache import semantic_cache_lookup, semantic_cache_store
 from app.services import critic as critic_service
 from app.services.boss import Boss
@@ -207,11 +208,35 @@ def _commit_turn(turn: _Turn, result: EstimationResult) -> None:
         project_type=turn.project_type.value,
     )
     turn.session.history.append(user=history_user_content, assistant=result.model_dump_json())
+    turn.session.turn_count += 1
     # append() ya no recorta: la compresión es la única que decide qué se olvida
     apply_compression(turn.session.history)
     turn.session.metadata = update_metadata(
         turn.session.metadata, turn.enriched_transcript, result, session_id=turn.session.session_id
     )
+
+
+def _observe_turn(turn: _Turn, attachments: list[tuple[str, str]], meta: LLMCallMeta) -> TurnObservation:
+    """Foto del turno ya comprometido (historial comprimido incluido); se emite y se devuelve al router."""
+    history = turn.session.history
+    observation = TurnObservation(
+        turn_index=turn.session.turn_count,
+        session_id=turn.session.session_id,
+        enriched_transcript_chars=len(turn.enriched_transcript),
+        attachments_total_chars=sum(len(text) for _, text in attachments),
+        messages_in_window=len(history.messages),
+        anchors_count=len(history.anchors),
+        summary_chars=len(history.summary or ""),
+        tokens_in=meta.tokens_in,
+        tokens_out=meta.tokens_out,
+        cost_usd=meta.cost_usd,
+        latency_ms=meta.latency_ms,
+        # El camino conversacional no consulta ninguna cache (ver estimate_conversational)
+        cache_hit_kind="none",
+        last_resolved_tier=turn.tier.value,
+    )
+    logger.info("turn_observed", **observation.model_dump())
+    return observation
 
 
 def estimate_conversational(
@@ -222,7 +247,7 @@ def estimate_conversational(
     detail_level: DetailLevel,
     output_format: OutputFormat,
     tier: Tier | None = None,
-) -> tuple[EstimationResult, LLMCallMeta]:
+) -> tuple[EstimationResult, LLMCallMeta, TurnObservation]:
     """Turno conversacional: usa el historial de la sesión y el project_metadata acumulado.
 
     A diferencia de estimate_project(), NO consulta ni escribe la cache exact-match ni la
@@ -252,7 +277,7 @@ def estimate_conversational(
     _totals_warnings(result)
     result = enforce_scope_response(result)
     _commit_turn(turn, result)
-    return result, meta
+    return result, meta, _observe_turn(turn, attachments, meta)
 
 
 def estimate_with_acb(
