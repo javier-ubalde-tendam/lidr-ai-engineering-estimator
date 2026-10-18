@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.embedding_pipeline.router import router as embeddings_router
 from app.logging_config import configure_logging
 from app.routers.estimations import router as estimations_router
 from app.routers.sessions import router as sessions_router
@@ -17,6 +18,8 @@ app = FastAPI(
 app.include_router(estimations_router, prefix="/api/v1")
 # Sin prefijo /api/v1 (a petición del enunciado): endpoints de sesión conversacional
 app.include_router(sessions_router)
+# Pipeline de embeddings (sesión 07): POST /embeddings/ingest, también sin prefijo /api/v1
+app.include_router(embeddings_router)
 
 
 @app.get("/health")
