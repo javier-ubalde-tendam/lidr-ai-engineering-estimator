@@ -5,13 +5,11 @@ from types import SimpleNamespace
 import httpx
 import openai
 import pytest
-from fastapi.testclient import TestClient
 
-from app.dependencies import get_chunker, get_embedder
 from app.embedding_pipeline.chunker import JSONStructuralChunker
 from app.embedding_pipeline.embedder import BATCH_SIZE, OpenAIEmbedder, estimate_cost_usd
-from app.embedding_pipeline.schemas import Budget, Chunk, EmbeddedChunk
-from app.main import app
+from app.embedding_pipeline.schemas import Chunk
+from tests.embedding_helpers import make_budget
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -22,31 +20,6 @@ def load_cosine_similarity():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.cosine_similarity
-
-
-def make_budget(budget_id: str = "BUD-1", n_components: int = 2) -> Budget:
-    return Budget.model_validate(
-        {
-            "budget_id": budget_id,
-            "client_metadata": {"name": "Acme", "sector": "finance", "country": "ES"},
-            "project_summary": "Mobile banking API",
-            "main_technology": "python",
-            "year": 2024,
-            "total_estimated_hours": 100,
-            "components": [
-                {
-                    "component_id": f"C-{i}",
-                    "name": f"Component {i}",
-                    "description": "Does something",
-                    "tech_stack": ["python", "redis"],
-                    "estimated_hours": 10,
-                    "complexity": "medium",
-                    "dependencies": [],
-                }
-                for i in range(n_components)
-            ],
-        }
-    )
 
 
 def make_chunks(n: int) -> list[Chunk]:
@@ -176,61 +149,6 @@ def test_other_errors_are_not_retried() -> None:
 def test_estimate_cost_usd() -> None:
     assert estimate_cost_usd(1_000_000) == pytest.approx(0.02)
     assert estimate_cost_usd(0) == 0.0
-
-
-# --- Router ---
-
-
-class FakeEmbedder:
-    def __init__(self, error: Exception | None = None) -> None:
-        self._error = error
-
-    def embed_many(self, chunks: list[Chunk]) -> list[EmbeddedChunk]:
-        if self._error:
-            raise self._error
-        return [EmbeddedChunk(**c.model_dump(), embedding=[0.1, 0.2]) for c in chunks]
-
-
-@pytest.fixture
-def client():
-    app.dependency_overrides[get_chunker] = lambda: JSONStructuralChunker()
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-
-
-def valid_payload() -> dict:
-    return {"budgets": [make_budget().model_dump()]}
-
-
-def test_ingest_returns_200_with_stats(client: TestClient) -> None:
-    app.dependency_overrides[get_embedder] = lambda: FakeEmbedder()
-
-    response = client.post("/embeddings/ingest", json=valid_payload())
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["stats"]["total_budgets"] == 1
-    assert body["stats"]["total_chunks"] == 2
-    assert body["stats"]["total_tokens"] == sum(c["token_count"] for c in body["chunks"])
-    assert body["chunks"][0]["embedding"] == [0.1, 0.2]
-
-
-def test_ingest_invalid_sector_returns_422(client: TestClient) -> None:
-    app.dependency_overrides[get_embedder] = lambda: FakeEmbedder()
-    payload = valid_payload()
-    payload["budgets"][0]["client_metadata"]["sector"] = "aerospace"
-
-    assert client.post("/embeddings/ingest", json=payload).status_code == 422
-
-
-def test_ingest_openai_error_returns_generic_500(client: TestClient) -> None:
-    error = openai.OpenAIError("secret detail sk-should-not-leak")
-    app.dependency_overrides[get_embedder] = lambda: FakeEmbedder(error)
-
-    response = client.post("/embeddings/ingest", json=valid_payload())
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Embedding service error"}
 
 
 # --- Cosine ---

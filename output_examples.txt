@@ -1,0 +1,48 @@
+Backend: http://ai_service:8000
+Ingesta: 15 presupuestos en data/budgets_sample.json
+  nuevos: 0 | ya existentes (409): 15 | fallos: 0
+
+Consulta 1/5 - Match directo
+  query: REST API development with JWT authentication for financial sector
+  tiempo: 213 ms | k=5
+  1. chunk_id=1 distance=0.4108 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  2. chunk_id=2 distance=0.4760 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  3. chunk_id=3 distance=0.4982 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  4. chunk_id=4 distance=0.5122 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  5. chunk_id=9 distance=0.5258 type=budget_component | [Project: Real-time payments gateway with fraud detection and reconciliation] [Client sector: finance | Year: 2023 | Mai
+
+Consulta 2/5 - Reformulación
+  query: secure backend service with token-based access control for banking applications
+  tiempo: 208 ms | k=5
+  1. chunk_id=1 distance=0.4075 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  2. chunk_id=2 distance=0.4556 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  3. chunk_id=3 distance=0.4774 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  4. chunk_id=4 distance=0.5353 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+  5. chunk_id=9 distance=0.5364 type=budget_component | [Project: Real-time payments gateway with fraud detection and reconciliation] [Client sector: finance | Year: 2023 | Mai
+
+Consulta 3/5 - Fuera de dominio
+  query: mobile application for restaurant reservations
+  tiempo: 180 ms | k=5
+  1. chunk_id=24 distance=0.5691 type=budget_component | [Project: Grocery delivery app with slot booking and route optimization] [Client sector: ecommerce | Year: 2024 | Main t
+  2. chunk_id=31 distance=0.5810 type=budget_component | [Project: Patient appointment and telemedicine platform with HL7/FHIR integration] [Client sector: healthcare | Year: 20
+  3. chunk_id=26 distance=0.5862 type=budget_component | [Project: Grocery delivery app with slot booking and route optimization] [Client sector: ecommerce | Year: 2024 | Main t
+  4. chunk_id=25 distance=0.6048 type=budget_component | [Project: Grocery delivery app with slot booking and route optimization] [Client sector: ecommerce | Year: 2024 | Main t
+  5. chunk_id=4 distance=0.6515 type=budget_component | [Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance] [Client sector: finance | Year: 2024 | M
+
+Consulta 4/5 - Ambigua
+  query: integration with external system
+  tiempo: 237 ms | k=5
+  1. chunk_id=45 distance=0.5980 type=budget_component | [Project: Factory IoT telemetry and predictive maintenance system] [Client sector: industrial | Year: 2024 | Main tech: 
+  2. chunk_id=37 distance=0.5981 type=budget_component | [Project: Pharmacy inventory and prescription fulfillment system] [Client sector: healthcare | Year: 2023 | Main tech: j
+  3. chunk_id=11 distance=0.6030 type=budget_component | [Project: Real-time payments gateway with fraud detection and reconciliation] [Client sector: finance | Year: 2023 | Mai
+  4. chunk_id=50 distance=0.6151 type=budget_component | [Project: Energy grid monitoring and demand-response platform] [Client sector: industrial | Year: 2024 | Main tech: java
+  5. chunk_id=9 distance=0.6197 type=budget_component | [Project: Real-time payments gateway with fraud detection and reconciliation] [Client sector: finance | Year: 2023 | Mai
+
+Consulta 5/5 - Muy específica
+  query: migration from monolith to microservices architecture using Kubernetes
+  tiempo: 243 ms | k=5
+  1. chunk_id=50 distance=0.6678 type=budget_component | [Project: Energy grid monitoring and demand-response platform] [Client sector: industrial | Year: 2024 | Main tech: java
+  2. chunk_id=48 distance=0.6820 type=budget_component | [Project: Warehouse management system with automated guided vehicle coordination] [Client sector: industrial | Year: 202
+  3. chunk_id=34 distance=0.6888 type=budget_component | [Project: Remote patient monitoring with wearable data ingestion and alerts] [Client sector: healthcare | Year: 2024 | M
+  4. chunk_id=47 distance=0.6952 type=budget_component | [Project: Warehouse management system with automated guided vehicle coordination] [Client sector: industrial | Year: 202
+  5. chunk_id=49 distance=0.6960 type=budget_component | [Project: Warehouse management system with automated guided vehicle coordination] [Client sector: industrial | Year: 202

@@ -1,0 +1,35 @@
+services:
+  frontend:
+    # Misma imagen que ai_service (mismo bloque build: la cache de capas evita reconstruir)
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: lidr-estimator:local
+    env_file:
+      - ../../.env
+    environment:
+      # Llamadas servidor Streamlit -> backend por la red de Compose, nunca localhost
+      API_BASE_URL: http://ai_service:8000
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      - "8501:8501"
+    command:
+      - streamlit
+      - run
+      - streamlit_app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    depends_on:
+      ai_service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s

@@ -4,18 +4,22 @@ version = "0.1.0"
 description = "AI-powered project estimation tool - Session 05 (conversational memory + attachments)"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.13",
+    "asyncpg>=0.29",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "instructor[litellm]>=1.17.0",
     "jinja2>=3.1.6",
     "litellm>=1.83.0",
     "openai>=3.3.0",
+    "pgvector>=0.3",
     "pydantic-settings>=2.15.0",
     "pypdf>=5.1.0",
     "python-docx>=1.1.2",
     "python-multipart>=0.0.20",
     "redis>=8.1.0",
     "redisvl>=0.27.2",
+    "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
     "tiktoken>=0.14.0",
@@ -33,6 +37,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Los tests de integración necesitan PostgreSQL+pgvector real: se piden con `-m integration`
+addopts = "-m 'not integration'"
+markers = ["integration: requiere PostgreSQL con pgvector (BD de pruebas separada)"]
 
 [tool.ruff]
 line-length = 100

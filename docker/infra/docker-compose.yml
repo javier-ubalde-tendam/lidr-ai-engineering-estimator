@@ -1,0 +1,36 @@
+services:
+  redis:
+    # Redis Stack (RediSearch) es necesario para redisvl / cache semantico: no usar Redis estandar
+    image: redis/redis-stack-server:latest
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - lidr-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: estimator
+      POSTGRES_USER: estimator
+      POSTGRES_PASSWORD: estimator
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - lidr-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 fuerza TCP: el servidor temporal de la inicializacion solo escucha por socket
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "estimator", "-d", "estimator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  lidr-redis-data:
+  lidr-postgres-data:

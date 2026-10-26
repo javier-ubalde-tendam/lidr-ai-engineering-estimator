@@ -1,0 +1,36 @@
+services:
+  ai_service:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: lidr-estimator:local
+    env_file:
+      - ../../.env
+    environment:
+      # Prevalecen sobre .env: dentro de Docker los servicios se resuelven por nombre, no por localhost
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://estimator:estimator@postgres:5432/estimator
+      # Lo usa query_examples.py desde contenedores efímeros (`run`/`exec`): el backend es ai_service
+      API_BASE_URL: http://ai_service:8000
+    ports:
+      - "8000:8000"
+    # Uvicorn solo arranca si las migraciones terminan bien
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s

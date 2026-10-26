@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 # Debe ir antes de importar app.*: llm_service lee la config al importarse.
 # Asignación directa (no setdefault) para que los tests nunca usen una clave real.
 os.environ["LLM_PROVIDER"] = "openai"
@@ -15,3 +17,9 @@ from app.logging_config import configure_logging  # noqa: E402
 
 # Sin configurar, structlog no filtra por nivel y logger.log(TRACE, ...) lanza KeyError
 configure_logging()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    # Los tests `async def` (marca anyio) corren solo con asyncio; trio no está instalado
+    return "asyncio"

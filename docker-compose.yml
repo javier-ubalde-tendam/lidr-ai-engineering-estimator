@@ -1,11 +1,7 @@
-services:
-  redis:
-    image: redis/redis-stack-server:latest
-    container_name: lidr-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - lidr-redis-data:/data
-
-volumes:
-  lidr-redis-data:
+# Orquestador: cada servicio vive en su propio Compose. `include` (Compose >= 2.20) los fusiona
+# en UN proyecto con una red compartida; las rutas de cada archivo incluido se resuelven desde
+# su propio directorio. No se fija `name:` para seguir usando los volumenes ya existentes.
+include:
+  - docker/infra/docker-compose.yml
+  - docker/backend/docker-compose.yml
+  - docker/frontend/docker-compose.yml

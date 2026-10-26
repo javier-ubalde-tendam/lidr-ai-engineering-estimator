@@ -1,5 +1,10 @@
 # Session 07 - Embeddings y chunking (ejercicio previo)
 
+> **Histórico:** el contrato de `POST /embeddings/ingest` descrito aquí (`{"budgets": [...]}` →
+> vectores + `stats`) fue sustituido en la sesión 08. El contrato vigente (un presupuesto por
+> petición, persistencia en PostgreSQL) está en [08-pgvector.md](08-pgvector.md). Chunker, embedder y
+> la utilidad `scripts/compare.py` siguen vigentes.
+
 ## Funcionalidad incremental
 
 Ejercicio previo a la sesión 7: un **pipeline mínimo** que convierte presupuestos históricos en
