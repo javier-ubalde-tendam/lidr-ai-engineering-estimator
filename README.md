@@ -109,7 +109,7 @@ docker compose cp ai_service:/app/output_examples.txt ./output_examples.txt
 ```
 
 El informe real generado está en [output_examples.txt](output_examples.txt). Es de una ejecución
-repetida (todo `409`); la primera ejecución sobre la BD vacía dejó 15 documents y 52 chunks y las
+repetida (todo `409`); la primera ejecución sobre la BD vacía dejó 15 documents y 52 chunks (con el corpus actual de 17 presupuestos: 17 documents y 60 chunks) y las
 repeticiones no cambian esos recuentos.
 
 Comprobar recuentos y que no hay índices vectoriales:
@@ -313,7 +313,7 @@ flowchart LR
 - **Coseno frente a L2 / producto interno**: la similitud entre textos depende de la dirección del
   vector, no de su norma. Con vectores normalizados el ranking de los tres coincide, pero coseno no
   depende de esa suposición y se alineará con `vector_cosine_ops` cuando haya índice vectorial.
-- **Sin índice vectorial (baseline)**: ni HNSW ni IVFFlat. Con 52 chunks la búsqueda exacta es instantánea
+- **Sin índice vectorial (baseline)**: ni HNSW ni IVFFlat. Con 60 chunks la búsqueda exacta es instantánea
   y sirve de referencia de calidad para medir después el coste de aproximar. Sí hay índices B-tree y GIN.
 - **`ix_documents_source_path` es único** (el ejemplo del enunciado es no único): garantiza el `409` también
   con peticiones concurrentes; solo se interpreta como duplicado la violación de ese índice.

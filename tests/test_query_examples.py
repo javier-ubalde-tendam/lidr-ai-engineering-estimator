@@ -44,7 +44,7 @@ def test_ingest_posts_each_budget_and_treats_409_as_existing() -> None:
         ok = qe.ingest_budgets(client, "http://test", report)
 
     assert ok is True
-    assert len(sent) == len(budgets) == 15
+    assert len(sent) == len(budgets)
     assert sent[0]["source_path"] == f"data/budgets_sample.json::{budgets[0]['budget_id']}"
     assert sent[0]["document_type"] == "historical_budget"
     assert sent[0]["content"] == budgets[0]

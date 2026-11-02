@@ -95,7 +95,7 @@ curl.exe -s -X POST http://localhost:8000/search -H "Content-Type: application/j
 ### 3. Script de ejemplo (ingesta + 5 consultas)
 
 `docker compose run --rm ai_service python query_examples.py`
-Es idempotente: una segunda ejecución muestra 15 × 409.
+Es idempotente: una segunda ejecución muestra 17 × 409.
 
 ### 4. Streamlit
 
