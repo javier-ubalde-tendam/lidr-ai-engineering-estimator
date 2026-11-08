@@ -19,11 +19,27 @@ dependencies = [
     "python-multipart>=0.0.20",
     "redis>=8.1.0",
     "redisvl>=0.27.2",
+    "sentence-transformers>=3.0",
     "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
     "tiktoken>=0.14.0",
+    # Direct dependency only so [tool.uv.sources] can route it to the CPU index on Linux
+    "torch>=2.4",
     "uvicorn[standard]>=0.54.0",
+]
+
+# Session 10: the cross-encoder runs on CPU. On Linux (Docker image) PyPI's torch pulls several
+# GB of CUDA libraries, so it comes from PyTorch's CPU-only index; Windows/macOS PyPI wheels are
+# already CPU-only. https://docs.astral.sh/uv/guides/integration/pytorch/
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
 ]
 
 [project.optional-dependencies]
@@ -53,6 +69,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.File"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+# No type stubs or py.typed marker; only imported lazily inside the reranker
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["setuptools>=68"]

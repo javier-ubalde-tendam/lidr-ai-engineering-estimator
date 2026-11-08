@@ -14,6 +14,10 @@ services:
       API_BASE_URL: http://ai_service:8000
     ports:
       - "8000:8000"
+    # Named volume for the Hugging Face cache: recreating the container does not re-download the
+    # cross-encoder (HF_HOME is defined in the Dockerfile)
+    volumes:
+      - lidr-hf-cache:/home/app/.cache/huggingface
     # Uvicorn solo arranca si las migraciones terminan bien
     command:
       - sh
@@ -34,3 +38,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+volumes:
+  lidr-hf-cache:

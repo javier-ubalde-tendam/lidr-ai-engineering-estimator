@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Contrato de esquema de la sesión 08: chunks.embedding es vector(1536). Cambiar de modelo, aunque
@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     # se sirve el hit ni se salta el LLM. Pásalo a False en .env cuando confíes en los scores
     # observados en los logs (semantic_cache_hit_log_only) para tu caso de uso
     SEMANTIC_CACHE_LOG_ONLY: bool = True
+
+    # Session 10 — retrieval (vector/hybrid) and cross-encoder reranking
+    RETRIEVAL_TOP_K: int = 10
+    # Cosine distance (0 = same direction): chunks farther than this are not "really close"
+    RETRIEVAL_DISTANCE_THRESHOLD: float = 0.6
+    RETRIEVAL_SEARCH_MODE: Literal["vector", "hybrid"] = "vector"
+    RERANKER_ENABLED: bool = False
+    # Multilingual, small, CPU-friendly cross-encoder
+    RERANKER_MODEL: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    # Recall-then-rerank: recall wide (50) so the relevant chunk is in the pool, keep top 5
+    RETRIEVAL_RECALL_TOP_K: int = Field(default=50, ge=1)
+    RERANK_TOP_N: int = Field(default=5, ge=1)
+    RRF_K: int = Field(default=60, ge=1)
+    # "or" = any query lexeme matches (default); "and" = plainto_tsquery semantics (all lexemes)
+    LEXICAL_MATCH_MODE: Literal["or", "and"] = "or"
 
     @model_validator(mode="after")
     def validate_embedding_model(self) -> "Settings":

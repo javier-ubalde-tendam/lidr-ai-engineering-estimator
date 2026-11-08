@@ -13,23 +13,29 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PATH="/opt/venv/bin:$PATH" \
-    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
+    HF_HOME=/home/app/.cache/huggingface
 
 WORKDIR /app
 
 # Capa de dependencias: solo se invalida si cambian pyproject.toml o uv.lock
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# --no-cache: uv's download cache (~1.6 GB with torch) must not stay baked into this layer
+RUN uv sync --frozen --no-dev --no-install-project --no-cache
 
 # El vocabulario BPE se descarga al construir la imagen, no en el primer arranque
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('text-embedding-3-small')"
 
 RUN useradd --create-home --uid 1000 app && chown app:app /app
+# Cross-encoder weights cache (session 10). Created here owned by `app` so the named volume
+# mounted on top inherits these permissions on first use (the model is not baked into the image)
+RUN mkdir -p "$HF_HOME" && chown -R app:app /home/app/.cache
 COPY --chown=app:app app ./app
 COPY --chown=app:app alembic ./alembic
 COPY --chown=app:app alembic.ini streamlit_app.py query_examples.py ./
 COPY --chown=app:app scripts ./scripts
 COPY --chown=app:app data ./data
+COPY --chown=app:app evals ./evals
 
 USER app
 
