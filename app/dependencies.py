@@ -10,6 +10,8 @@ from app.embedding_pipeline.chunker import JSONStructuralChunker
 from app.embedding_pipeline.embedder import OpenAIEmbedder
 from app.embedding_pipeline.ingestion import IngestionService
 from app.embedding_pipeline.retriever import Retriever
+from app.generation.rag.retrieval.reranker import CrossEncoderReranker
+from app.generation.rag.store import ChunkSearchStore
 from app.sessions.store import SessionStore
 
 
@@ -38,6 +40,19 @@ def get_chunker() -> JSONStructuralChunker:
 def get_embedder() -> OpenAIEmbedder:
     # Reutiliza el cliente OpenAI compartido; el embedder solo conoce la interfaz del cliente
     return OpenAIEmbedder(client=get_openai_client(), model=get_settings().EMBEDDING_MODEL)
+
+
+@lru_cache
+def get_chunk_store() -> ChunkSearchStore:
+    # Stateless read-only store (session 10): one instance for the whole app
+    return ChunkSearchStore()
+
+
+@lru_cache
+def get_reranker() -> CrossEncoderReranker:
+    # Singleton so the model is loaded once per process; constructing it does NOT load the model
+    # (that happens on the first rerank)
+    return CrossEncoderReranker.from_settings()
 
 
 # Servicios por petición: comparten la AsyncSession (una por request) y los singletons anteriores.
