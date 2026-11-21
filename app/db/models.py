@@ -2,13 +2,27 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    BigInteger,
+    Computed,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.config import EMBEDDING_DIMENSION
 
 SOURCE_PATH_INDEX = "ix_documents_source_path"
+# Text search configuration of the lexical branch (session 10). The corpus is in English. It must
+# be identical in migration 0002, this model and ChunkSearchStore.search_lexical: with a different
+# config Postgres cannot use the GIN index and the matching silently changes.
+TEXT_SEARCH_CONFIG = "english"
 
 
 class Base(DeclarativeBase):
@@ -40,6 +54,7 @@ class Chunk(Base):
         Index("ix_chunks_document_id", "document_id"),
         Index("ix_chunks_chunk_type", "chunk_type"),
         Index("ix_chunks_metadata_gin", "metadata", postgresql_using="gin"),
+        Index("ix_chunks_content_tsv", "content_tsv", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -55,4 +70,11 @@ class Chunk(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Read-only: Postgres computes it from `content` on every insert/update (no trigger to keep
+    # in sync). deferred=True: loading a Chunk entity does not fetch it unless asked
+    content_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(f"to_tsvector('{TEXT_SEARCH_CONFIG}', content)", persisted=True),
+        deferred=True,
     )

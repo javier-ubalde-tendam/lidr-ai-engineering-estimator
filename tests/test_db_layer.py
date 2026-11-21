@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pgvector.sqlalchemy import Vector
 from pydantic import ValidationError
@@ -8,8 +10,10 @@ from app.config import (
     DatabaseSettings,
     Settings,
 )
-from app.db.models import Base, Chunk, Document
+from app.db.models import TEXT_SEARCH_CONFIG, Base, Chunk, Document
 from app.db.session import dispose_engine, get_engine
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_tables_columns_and_nullability_match_the_spec() -> None:
@@ -20,6 +24,7 @@ def test_tables_columns_and_nullability_match_the_spec() -> None:
     }  # fmt: skip
     assert set(chunks.columns.keys()) == {
         "id", "document_id", "chunk_type", "content", "embedding", "metadata", "created_at",
+        "content_tsv",
     }  # fmt: skip
     assert chunks.c.embedding.nullable is True
     assert isinstance(chunks.c.embedding.type, Vector)
@@ -45,9 +50,11 @@ def test_indexes_are_relational_only_and_source_path_is_unique() -> None:
         "ix_chunks_document_id",
         "ix_chunks_chunk_type",
         "ix_chunks_metadata_gin",
+        "ix_chunks_content_tsv",
     }
     assert indexes["ix_documents_source_path"].unique
     assert indexes["ix_chunks_metadata_gin"].dialect_options["postgresql"]["using"] == "gin"
+    assert indexes["ix_chunks_content_tsv"].dialect_options["postgresql"]["using"] == "gin"
     # Ningún índice vectorial (HNSW/IVFFlat): la búsqueda exacta es el baseline
     assert all("embedding" not in index.columns for index in indexes.values())
 
@@ -77,3 +84,15 @@ async def test_dispose_engine_without_engine_does_not_connect() -> None:
     await dispose_engine()
 
     assert get_engine.cache_info().currsize == 0
+
+
+def test_text_search_config_matches_migration_0002() -> None:
+    # The migration hard-codes the regconfig (migrations must not depend on app code that changes)
+    migration = (ROOT / "alembic" / "versions" / "0002_chunks_content_tsv_fts.py").read_text(
+        encoding="utf-8"
+    )
+    computed = Chunk.__table__.c.content_tsv.computed
+
+    assert f"to_tsvector('{TEXT_SEARCH_CONFIG}', content)" in migration
+    assert computed is not None and computed.persisted is True
+    assert f"to_tsvector('{TEXT_SEARCH_CONFIG}', content)" == str(computed.sqltext)

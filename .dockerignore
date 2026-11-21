@@ -18,7 +18,8 @@ build
 reference
 docs
 tests
-evals
+# evals/ IS copied (session 10 evaluation script runs in the container); not its generated PDFs
+evals/stress/fixtures/generated
 output_examples.txt
 Dockerfile
 .dockerignore

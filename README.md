@@ -183,6 +183,7 @@ streamlit_app.py                          Cliente: formulario (stream) y convers
 | `GET` | `/health` | Healthcheck |
 | `POST` | `/embeddings/ingest` | Sesión 08: ingesta UN presupuesto en PostgreSQL (trocea, embebe y persiste en una transacción). `200`/`409`/`422` |
 | `POST` | `/search` | Sesión 08: búsqueda semántica top-k por distancia coseno calculada en PostgreSQL |
+| `POST` | `/v1/retrieval/search` | Sesión 10: búsqueda vectorial o híbrida (RRF), con reranking opcional. `200` (soft-fail con `low_confidence`)/`422`/`502` |
 
 ## Variables de entorno
 
@@ -232,6 +233,37 @@ Detalle y cómo leer el CSV en [docs/sessions/06-stress-cag.md](docs/sessions/06
 - [docs/sessions/06-stress-cag.md](docs/sessions/06-stress-cag.md)
 - [docs/sessions/07-embeddings+chunking.md](docs/sessions/07-embeddings+chunking.md) (contrato histórico)
 - [docs/sessions/08-pgvector.md](docs/sessions/08-pgvector.md)
+- [docs/sessions/10-hybrid-reranking.md](docs/sessions/10-hybrid-reranking.md)
+
+## Sesión 10: búsqueda híbrida + reranking
+
+Rama léxica full-text (`content_tsv` generada + índice GIN, migración `0002`), fusión RRF con la
+rama vectorial y reranking con cross-encoder (recall 50 → top 5), detrás de `POST /v1/retrieval/search`.
+Decisiones, resultados A/B/C/D y conclusiones en
+[docs/sessions/10-hybrid-reranking.md](docs/sessions/10-hybrid-reranking.md).
+
+| Variable | Default | Qué controla |
+|---|---|---|
+| `RETRIEVAL_TOP_K` | `10` | Resultados sin reranking |
+| `RETRIEVAL_DISTANCE_THRESHOLD` | `0.6` | Distancia coseno máxima de la rama vectorial |
+| `RETRIEVAL_SEARCH_MODE` | `vector` | `vector` o `hybrid` (el campo `search_mode` de la petición prevalece) |
+| `RERANKER_ENABLED` | `false` | Reranking por defecto (el campo `rerank` de la petición prevalece) |
+| `RERANKER_MODEL` | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | Cross-encoder (CPU, multilingüe) |
+| `RETRIEVAL_RECALL_TOP_K` | `50` | Candidatos recuperados antes de fusionar/reordenar |
+| `RERANK_TOP_N` | `5` | Resultados que deja el reranker |
+| `RRF_K` | `60` | Constante de suavizado de RRF |
+| `LEXICAL_MATCH_MODE` | `or` | `or` (cualquier lexema) o `and` (`plainto_tsquery` tal cual) |
+
+`Settings` se lee al arrancar: tras cambiar `.env`, `docker compose up -d --force-recreate ai_service`.
+
+```powershell
+# Puerta de entrada: el cross-encoder carga y ordena bien (exit 0)
+docker compose exec ai_service python -m app.generation.rag.retrieval.verify_reranker
+# Medición A/B/C/D sobre evals/golden_retrieval.json (necesita OPENAI_API_KEY y corpus ingerido)
+docker compose exec ai_service python scripts/eval_retrieval_s10.py
+docker compose cp ai_service:/app/evals/retrieval_s10_results.md ./evals/retrieval_s10_results.md
+docker compose cp ai_service:/app/evals/retrieval_s10_results.json ./evals/retrieval_s10_results.json
+```
 
 ## Sesión 05: memoria + adjuntos
 

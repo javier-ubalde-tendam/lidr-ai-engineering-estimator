@@ -9,6 +9,7 @@ from app.embedding_pipeline.router import router as embeddings_router
 from app.embedding_pipeline.router import search_router
 from app.logging_config import configure_logging
 from app.routers.estimations import router as estimations_router
+from app.routers.retrieval import router as retrieval_router
 from app.routers.sessions import router as sessions_router
 
 configure_logging()
@@ -35,6 +36,8 @@ app.include_router(sessions_router)
 # Ingesta en PostgreSQL (sesión 08): POST /embeddings/ingest y POST /search, también sin /api/v1
 app.include_router(embeddings_router)
 app.include_router(search_router)
+# Session 10: hybrid search + reranking (POST /v1/retrieval/search). /search is left untouched
+app.include_router(retrieval_router)
 
 
 @app.get("/health")

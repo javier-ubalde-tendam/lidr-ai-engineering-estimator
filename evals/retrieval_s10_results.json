@@ -1,0 +1,311 @@
+{
+  "metadata": {
+    "date": "2026-11-08T19:04:49+00:00",
+    "documents": 17,
+    "chunks": 60,
+    "queries": 5,
+    "k": 5,
+    "recall_k": 50,
+    "rrf_k": 60,
+    "lexical_match_mode": "or",
+    "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+    "distance_threshold": 2.0,
+    "measured_runs_per_query": 5,
+    "embedding_latency_mean_ms": 274.8482207998677,
+    "device": "cpu",
+    "cpu": "x86_64 x12 (Linux)"
+  },
+  "queries": [
+    "q1-ecommerce-checkout-trap",
+    "q2-finance-lending",
+    "q3-healthcare-telemedicine",
+    "q4-industrial-iot-maintenance",
+    "q5-logistics-warehouse"
+  ],
+  "results": {
+    "A": {
+      "search": "Vectorial",
+      "reranking": "No",
+      "precision_at_k": 0.8800000000000001,
+      "latency_mean_ms": 6.843996400020842,
+      "latency_p50_ms": 5.22647700017842,
+      "latency_p95_ms": 20.112247999350075,
+      "mean_lexical_hits": 0.0,
+      "per_query": {
+        "q1-ecommerce-checkout-trap": {
+          "precision_at_k": 1.0,
+          "top_budget_ids": [
+            "BUD-2024-005",
+            "BUD-2024-017",
+            "BUD-2024-017",
+            "BUD-2024-017",
+            "BUD-2024-017"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 5
+        },
+        "q2-finance-lending": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-006"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 5
+        },
+        "q3-healthcare-telemedicine": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-012"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 5
+        },
+        "q4-industrial-iot-maintenance": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-010",
+            "BUD-2024-015"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 5
+        },
+        "q5-logistics-warehouse": {
+          "precision_at_k": 1.0,
+          "top_budget_ids": [
+            "BUD-2024-014",
+            "BUD-2024-014",
+            "BUD-2024-014",
+            "BUD-2024-014",
+            "BUD-2024-007"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 5
+        }
+      }
+    },
+    "B": {
+      "search": "Híbrida",
+      "reranking": "No",
+      "precision_at_k": 0.8,
+      "latency_mean_ms": 9.290745720063569,
+      "latency_p50_ms": 8.551332000024559,
+      "latency_p95_ms": 13.180236999687622,
+      "mean_lexical_hits": 26.6,
+      "per_query": {
+        "q1-ecommerce-checkout-trap": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-005",
+            "BUD-2024-017",
+            "BUD-2024-017",
+            "BUD-2024-006",
+            "BUD-2024-017"
+          ],
+          "lexical_hits": 24,
+          "vector_hits": 50
+        },
+        "q2-finance-lending": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-004"
+          ],
+          "lexical_hits": 41,
+          "vector_hits": 50
+        },
+        "q3-healthcare-telemedicine": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-007"
+          ],
+          "lexical_hits": 21,
+          "vector_hits": 50
+        },
+        "q4-industrial-iot-maintenance": {
+          "precision_at_k": 0.6,
+          "top_budget_ids": [
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-010",
+            "BUD-2024-010"
+          ],
+          "lexical_hits": 32,
+          "vector_hits": 50
+        },
+        "q5-logistics-warehouse": {
+          "precision_at_k": 1.0,
+          "top_budget_ids": [
+            "BUD-2024-014",
+            "BUD-2024-007",
+            "BUD-2024-014",
+            "BUD-2024-007",
+            "BUD-2024-007"
+          ],
+          "lexical_hits": 15,
+          "vector_hits": 50
+        }
+      }
+    },
+    "C": {
+      "search": "Vectorial",
+      "reranking": "Sí",
+      "precision_at_k": 0.8400000000000001,
+      "latency_mean_ms": 5513.959954480051,
+      "latency_p50_ms": 6170.47123500015,
+      "latency_p95_ms": 6541.697493999891,
+      "mean_lexical_hits": 0.0,
+      "per_query": {
+        "q1-ecommerce-checkout-trap": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-005",
+            "BUD-2024-017",
+            "BUD-2024-008",
+            "BUD-2024-017",
+            "BUD-2024-017"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 50
+        },
+        "q2-finance-lending": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-006"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 50
+        },
+        "q3-healthcare-telemedicine": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-010"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 50
+        },
+        "q4-industrial-iot-maintenance": {
+          "precision_at_k": 1.0,
+          "top_budget_ids": [
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-015",
+            "BUD-2024-015",
+            "BUD-2024-015"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 50
+        },
+        "q5-logistics-warehouse": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-014",
+            "BUD-2024-007",
+            "BUD-2024-007",
+            "BUD-2024-007",
+            "BUD-2024-016"
+          ],
+          "lexical_hits": 0,
+          "vector_hits": 50
+        }
+      }
+    },
+    "D": {
+      "search": "Híbrida",
+      "reranking": "Sí",
+      "precision_at_k": 0.8400000000000001,
+      "latency_mean_ms": 6216.078231760075,
+      "latency_p50_ms": 6171.746924000217,
+      "latency_p95_ms": 6694.960595000339,
+      "mean_lexical_hits": 26.6,
+      "per_query": {
+        "q1-ecommerce-checkout-trap": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-005",
+            "BUD-2024-017",
+            "BUD-2024-008",
+            "BUD-2024-017",
+            "BUD-2024-017"
+          ],
+          "lexical_hits": 24,
+          "vector_hits": 50
+        },
+        "q2-finance-lending": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-002",
+            "BUD-2024-006"
+          ],
+          "lexical_hits": 41,
+          "vector_hits": 50
+        },
+        "q3-healthcare-telemedicine": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-009",
+            "BUD-2024-010"
+          ],
+          "lexical_hits": 21,
+          "vector_hits": 50
+        },
+        "q4-industrial-iot-maintenance": {
+          "precision_at_k": 1.0,
+          "top_budget_ids": [
+            "BUD-2024-013",
+            "BUD-2024-013",
+            "BUD-2024-015",
+            "BUD-2024-015",
+            "BUD-2024-015"
+          ],
+          "lexical_hits": 32,
+          "vector_hits": 50
+        },
+        "q5-logistics-warehouse": {
+          "precision_at_k": 0.8,
+          "top_budget_ids": [
+            "BUD-2024-014",
+            "BUD-2024-007",
+            "BUD-2024-007",
+            "BUD-2024-007",
+            "BUD-2024-016"
+          ],
+          "lexical_hits": 15,
+          "vector_hits": 50
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "description": "Session 10 retrieval golden set. A retrieved chunk is relevant iff its budget_id is in relevant_budget_ids. Relevant = the budget is a real analogy to estimate the project, not just shared vocabulary. PENDING HUMAN REVIEW: see evals/GOLDEN_SET_REVIEW.md.",
+  "k": 5,
+  "queries": [
+    {
+      "id": "q1-ecommerce-checkout-trap",
+      "sector": "ecommerce",
+      "query": "Online shop for a clothing brand: product listing, shopping cart, checkout where customers pay by card through a payment provider, discount codes and an order confirmation email.",
+      "relevant_budget_ids": ["BUD-2024-005", "BUD-2024-017"],
+      "note": "TRAP. 005 (headless storefront: catalog, cart/checkout with promotions and payment provider integration) and 017 (bare e-commerce MVP: product list, cart, checkout, order email) are the analogies. BUD-2024-003 (real-time payments gateway: authorization/capture, fraud, settlement, merchant refunds) shares the payment vocabulary but is building the gateway itself, useless to estimate a shop that consumes one. 006 (multi-vendor payouts) and 008 (fashion returns: 'fashion' / 'clothing' overlap) are distractors."
+    },
+    {
+      "id": "q2-finance-lending",
+      "sector": "finance",
+      "query": "Digital lending platform for small businesses: online loan application with KYC and document upload, automated credit risk scoring from bank statements, legally binding e-signature of the contract and periodic reports for the regulator.",
+      "relevant_budget_ids": ["BUD-2024-002"],
+      "note": "Only 002 (loan origination: credit scoring, KYC workflow, e-signature, regulatory reporting) is a real analogy; it has 4 chunks so the precision@5 ceiling is 0.80. Distractors: 004 ('risk profiling' of investors), 006 ('KYC' of marketplace vendors), 012 ('regulatory dataset export' for clinical trials), 001 (banking API but no lending)."
+    },
+    {
+      "id": "q3-healthcare-telemedicine",
+      "sector": "healthcare",
+      "query": "Outpatient clinic app where patients book visits with doctors, receive reminders, join video consultations from home, with records synchronised to the hospital EHR through HL7 FHIR and GDPR consent tracking.",
+      "relevant_budget_ids": ["BUD-2024-009"],
+      "note": "Only 009 (FHIR integration, appointment scheduling with reminders, WebRTC telemedicine, consent and audit) matches; 4 chunks so the precision@5 ceiling is 0.80. Distractors: 010 (remote monitoring, healthcare but no scheduling/video), 014 'dock appointment scheduling' and 007 'slot booking' (scheduling vocabulary, other domain)."
+    },
+    {
+      "id": "q4-industrial-iot-maintenance",
+      "sector": "industrial",
+      "query": "Monitoring of production line machines: collect sensor readings over MQTT into a time-series database, detect anomalies to predict breakdowns before they happen, and surface the alerts in the operators' existing control-room screens.",
+      "relevant_budget_ids": ["BUD-2024-013", "BUD-2024-015"],
+      "note": "013 (factory IoT telemetry, predictive maintenance, SCADA dashboard) is the direct analogy; 015 (energy grid: high-volume meter data pipeline + forecasting) is a close industrial telemetry analogy. Borderline, marked NOT relevant: 010 (wearable streams + alerting + dashboard: similar architecture but healthcare/clinical rules). Distractor: 003 'real-time fraud detection' (anomaly vocabulary)."
+    },
+    {
+      "id": "q5-logistics-warehouse",
+      "sector": "industrial",
+      "query": "Software for a regional distribution centre: stock and picking with barcode scanners, booking time slots for trucks at the loading docks, and planning the delivery routes of the van fleet.",
+      "relevant_budget_ids": ["BUD-2024-014", "BUD-2024-007"],
+      "note": "014 (warehouse management core, yard and dock scheduling) and 007 (delivery slot booking, route optimization, inventory sync) together cover the scope. Distractors: 011 (pharmacy inventory and reorder), 008 (warehouse grading of returns), 006 (order fulfillment state machines)."
+    }
+  ]
+}
