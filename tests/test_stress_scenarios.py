@@ -1,9 +1,9 @@
 import pytest
 
-from app.guardrails.input import check_input
-from app.sessions.compression.anchors import AnchorDetector
-from app.sessions.models import Message, ProjectMetadata
-from app.sessions.tier_resolver import Tier, resolve_tier
+from app.foundation.guardrails.input import check_input
+from app.generation.conversation.compression.anchors import AnchorDetector
+from app.generation.conversation.models import Message, ProjectMetadata
+from app.generation.conversation.tier_resolver import Tier, resolve_tier
 from evals.stress.scenarios import SCENARIOS, Scenario
 
 # El heurístico de anclas es la única pieza que el escenario `contradiction` activa a propósito

@@ -1,8 +1,12 @@
 import pytest
 
-from app.schemas.critic import CriticFeedback
-from app.schemas.estimation import LOW_CONFIDENCE_THRESHOLD, OUT_OF_SCOPE_PREFIX, EstimationResult
-from app.services.boss import SUMMARY_MAX_LENGTH, Boss
+from app.domain.schemas.critic import CriticFeedback
+from app.domain.schemas.estimation import (
+    LOW_CONFIDENCE_THRESHOLD,
+    OUT_OF_SCOPE_PREFIX,
+    EstimationResult,
+)
+from app.generation.agentic.boss import SUMMARY_MAX_LENGTH, Boss
 from tests.sessions_helpers import GOOD_ESTIMATION_PAYLOAD
 
 

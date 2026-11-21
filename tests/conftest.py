@@ -12,11 +12,26 @@ os.environ["ANCHOR_DETECTION_MODE"] = "heuristic"  # sin llamadas LLM extra en l
 os.environ["BOSS_MAX_ITERATIONS"] = "3"
 os.environ["STRUCTURED_OUTPUT_MAX_RETRIES"] = "2"
 os.environ["LOG_LEVEL"] = "INFO"
+# Claves obviamente falsas: los routers protegidos nunca dependen de las del .env local
+os.environ["RETRIEVAL_API_KEY"] = "test-retrieval-key"
+os.environ["ESTIMATE_API_KEY"] = "test-estimate-key"
 
-from app.logging_config import configure_logging  # noqa: E402
+from app.api.rate_limiting import limiter
+from app.logging_config import configure_logging
 
 # Sin configurar, structlog no filtra por nivel y logger.log(TRACE, ...) lanza KeyError
 configure_logging()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> None:
+    # El limiter es global (en memoria): sin reset, los contadores de un test afectarían a otros
+    limiter.reset()
+
+
+@pytest.fixture
+def retrieval_api_key() -> str:
+    return os.environ["RETRIEVAL_API_KEY"]
 
 
 @pytest.fixture

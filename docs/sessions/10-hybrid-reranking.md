@@ -11,13 +11,13 @@ autenticación, rate limiting, idempotencia, `X-Request-ID`, Streamlit. `/search
 | Pieza | Fichero |
 | --- | --- |
 | Migración `content_tsv` (generada) + índice GIN | [alembic/versions/0002_chunks_content_tsv_fts.py](../../alembic/versions/0002_chunks_content_tsv_fts.py) |
-| Modelo ORM (`Computed`, índice GIN, `TEXT_SEARCH_CONFIG`) | [app/db/models.py](../../app/db/models.py) |
+| Modelo ORM (`Computed`, índice GIN, `TEXT_SEARCH_CONFIG`) | [app/generation/rag/store/models.py](../../app/generation/rag/store/models.py) |
 | Store de solo lectura (k-NN con umbral + rama léxica) | [app/generation/rag/store.py](../../app/generation/rag/store.py) |
 | RRF (función pura) | [app/generation/rag/retrieval/fusion.py](../../app/generation/rag/retrieval/fusion.py) |
 | Cross-encoder (carga perezosa) | [app/generation/rag/retrieval/reranker.py](../../app/generation/rag/retrieval/reranker.py) |
 | Puerta de entrada del reranker | [app/generation/rag/retrieval/verify_reranker.py](../../app/generation/rag/retrieval/verify_reranker.py) |
 | `retrieve()` (las 4 configuraciones) | [app/generation/rag/retrieval/pipeline.py](../../app/generation/rag/retrieval/pipeline.py) |
-| Endpoint `POST /v1/retrieval/search` | [app/routers/retrieval.py](../../app/routers/retrieval.py) |
+| Endpoint `POST /v1/retrieval/search` | [app/api/routers/retrieval.py](../../app/api/routers/retrieval.py) |
 | Golden set + revisión humana | [evals/golden_retrieval.json](../../evals/golden_retrieval.json), [evals/GOLDEN_SET_REVIEW.md](../../evals/GOLDEN_SET_REVIEW.md) |
 | Métrica Precision@5 y percentiles | [evals/retrieval_metrics.py](../../evals/retrieval_metrics.py) |
 | Script de medición | [scripts/eval_retrieval_s10.py](../../scripts/eval_retrieval_s10.py) |
@@ -75,13 +75,14 @@ autenticación, rate limiting, idempotencia, `X-Request-ID`, Streamlit. `/search
 
    ```powershell
    $body = @{ query_text = "Online shop with shopping cart, card checkout and order email"; top_k = 5; search_mode = "hybrid"; rerank = $true } | ConvertTo-Json
-   Invoke-RestMethod -Method Post -Uri http://localhost:8000/v1/retrieval/search -ContentType "application/json" -Body $body
+   $headers = @{ "X-API-Key" = $env:RETRIEVAL_API_KEY }
+   Invoke-RestMethod -Method Post -Uri http://localhost:8000/v1/retrieval/search -ContentType "application/json" -Headers $headers -Body $body
    ```
 
    curl:
 
    ```bash
-   curl -s -X POST http://localhost:8000/v1/retrieval/search -H "Content-Type: application/json" \
+   curl -s -X POST http://localhost:8000/v1/retrieval/search -H "Content-Type: application/json" -H "X-API-Key: $RETRIEVAL_API_KEY" \
      -d '{"query_text": "Online shop with shopping cart, card checkout and order email", "top_k": 5, "search_mode": "hybrid", "rerank": true}'
    ```
 

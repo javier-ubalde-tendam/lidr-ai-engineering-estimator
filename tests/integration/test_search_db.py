@@ -5,10 +5,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Chunk, Document
+from app.generation.rag.store.models import Chunk, Document
+from app.generation.rag.store.repository import ChunkSearchStore
 from tests.embedding_helpers import FakeOpenAIClient, angle_vector
 from tests.integration.conftest import run
 
@@ -148,16 +149,57 @@ def test_sql_orders_and_limits_in_postgres_with_bound_parameters(
 
     search(api, k=3)
 
-    statement, _ = next(s for s in statements if "FROM chunks" in s[0] and "<=>" in s[0])
+    statement, _ = next(
+        s for s in statements if "FROM budget_chunks" in s[0] and "<=>" in s[0]
+    )
     assert "ORDER BY" in statement and "LIMIT" in statement
     assert "IS NOT NULL" in statement
+    # /search stays EXACT (full-precision vector, sequential scan): it is the baseline, so it does
+    # not use the halfvec expression of the HNSW index (ChunkSearchStore does)
+    assert "halfvec" not in statement.lower()
     assert "[" not in statement  # el vector viaja como parámetro, no interpolado
 
 
-def test_no_vector_index_exists(sql: Callable[..., list[Any]]) -> None:
+def test_hnsw_halfvec_indexes_exist_on_the_three_collections(
+    sql: Callable[..., list[Any]],
+) -> None:
     indexes = sql(
-        "SELECT indexdef FROM pg_indexes WHERE tablename = 'chunks' AND "
-        "(indexdef ILIKE '%hnsw%' OR indexdef ILIKE '%ivfflat%' OR indexdef ILIKE '%diskann%')"
+        "SELECT tablename, indexdef FROM pg_indexes "
+        "WHERE indexdef ILIKE '%hnsw%' ORDER BY tablename"
     )
 
-    assert indexes == []
+    assert [index.tablename for index in indexes] == [
+        "budget_chunks",
+        "technical_doc_chunks",
+        "transcript_chunks",
+    ]
+    assert all("halfvec_cosine_ops" in index.indexdef for index in indexes)
+    assert all("halfvec(1536)" in index.indexdef for index in indexes)
+
+
+def test_the_search_query_uses_the_hnsw_index(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    captured: list[tuple[str, Any]] = []
+
+    @event.listens_for(session_factory.kw["bind"].sync_engine, "before_cursor_execute")
+    def capture(_conn: Any, _cursor: Any, statement: str, parameters: Any, *_: Any) -> None:
+        captured.append((statement, parameters))
+
+    async def explain() -> str:
+        async with session_factory() as session, session.begin():
+            # The exact statement the store emits for the budget collection
+            await ChunkSearchStore().search_filtered(
+                session, query_vector=angle_vector(0.1), top_k=3, distance_threshold=0.6
+            )
+            statement, parameters = next(
+                s for s in captured if "<=>" in s[0] and "ORDER BY" in s[0]
+            )
+            # A tiny table makes the planner prefer a seq scan; disabling it proves the index is
+            # APPLICABLE to the expression the store emits (the planner picks it at scale)
+            await session.execute(text("SET LOCAL enable_seqscan = off"))
+            connection = await session.connection()
+            plan = await connection.exec_driver_sql(f"EXPLAIN {statement}", parameters)
+            return "\n".join(row[0] for row in plan)
+
+    assert "ix_budget_chunks_embedding_hnsw" in run(explain())

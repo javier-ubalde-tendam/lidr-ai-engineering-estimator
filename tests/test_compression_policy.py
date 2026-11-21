@@ -1,5 +1,5 @@
-from app.sessions.compression import AnchorDetector, CompressionPolicy
-from app.sessions.models import ConversationHistory, Message
+from app.generation.conversation.compression import AnchorDetector, CompressionPolicy
+from app.generation.conversation.models import ConversationHistory, Message
 
 MAX_TURNS = 2
 ANCHOR_TURN = "We signed the contract yesterday, so the scope is final."

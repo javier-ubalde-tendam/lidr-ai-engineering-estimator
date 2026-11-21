@@ -1,5 +1,6 @@
-from app import semantic_cache
-from app.schemas.estimation import (
+from redisvl.exceptions import RedisVLError
+
+from app.domain.schemas.estimation import (
     DetailLevel,
     EstimationRequest,
     EstimationResult,
@@ -7,8 +8,12 @@ from app.schemas.estimation import (
     Phase,
     ProjectType,
 )
-from app.semantic_cache import build_semantic_bucket, semantic_cache_lookup, semantic_cache_store
-from redisvl.exceptions import RedisVLError
+from app.generation.cag import semantic as semantic_cache
+from app.generation.cag.semantic import (
+    build_semantic_bucket,
+    semantic_cache_lookup,
+    semantic_cache_store,
+)
 
 GOOD_RESULT = EstimationResult(
     summary="Mobile booking app with online payments.",

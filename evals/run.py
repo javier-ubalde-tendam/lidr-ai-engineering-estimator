@@ -113,8 +113,8 @@ def _client_for_case(http_base_url: str | None) -> Iterator[httpx.Client]:
 
     from app.config import get_settings
     from app.dependencies import get_session_store
+    from app.generation.conversation.store import SessionStore
     from app.main import app
-    from app.sessions.store import SessionStore
 
     # Un store nuevo por caso: se crea UNA vez (el override se evalúa en cada request) para que
     # POST /sessions y las peticiones siguientes vean la misma sesión

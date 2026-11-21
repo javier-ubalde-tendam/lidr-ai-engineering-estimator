@@ -3,8 +3,14 @@ import re
 import pytest
 from jinja2 import TemplateNotFound
 
-from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import DetailLevel, EstimationRequest, EstimationResult, OutputFormat, ProjectType
+from app.domain.schemas.estimation import (
+    DetailLevel,
+    EstimationRequest,
+    EstimationResult,
+    OutputFormat,
+    ProjectType,
+)
+from app.foundation.prompts.loader import render_estimation_prompt
 
 
 def make_request(**overrides) -> EstimationRequest:
@@ -123,8 +129,8 @@ def test_v2_examples_are_valid_estimation_results():
 
 
 def _conversational(tier, critic_feedback=None, metadata=None):
-    from app.prompts.loader import render_conversational_prompt
-    from app.sessions.models import ProjectMetadata
+    from app.foundation.prompts.loader import render_conversational_prompt
+    from app.generation.conversation.models import ProjectMetadata
 
     return render_conversational_prompt(
         transcript="We need a web portal for gym bookings with payments.",
@@ -138,7 +144,7 @@ def _conversational(tier, critic_feedback=None, metadata=None):
 
 
 def _feedback():
-    from app.schemas.critic import CriticFeedback, CriticIssue
+    from app.domain.schemas.critic import CriticFeedback, CriticIssue
 
     return CriticFeedback(
         verdict="needs_iteration",
@@ -219,8 +225,8 @@ def test_v4_critic_feedback_lists_every_issue_in_the_expected_format():
 
 
 def test_v3_prompt_still_renders_with_the_new_context_variables():
-    from app.prompts.loader import render_conversational_prompt
-    from app.sessions.models import ProjectMetadata
+    from app.foundation.prompts.loader import render_conversational_prompt
+    from app.generation.conversation.models import ProjectMetadata
 
     system, user = render_conversational_prompt(
         transcript="We need a web portal for gym bookings.",

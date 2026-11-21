@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_session_store
+from app.dependencies import get_openai_client, get_session_store
+from app.generation.conversation.models import SUMMARY_PREFIX
+from app.generation.conversation.store import SessionStore
 from app.main import app
-from app.sessions.models import SUMMARY_PREFIX
-from app.sessions.store import SessionStore
 from tests.sessions_helpers import (
     EMPTY_METADATA_PAYLOAD,
     GOOD_ESTIMATION_PAYLOAD,
@@ -32,7 +32,7 @@ def _post_turns(session_id: str, transcripts: list[str]) -> None:
 def _setup(monkeypatch):
     store = SessionStore(max_conversation_turns=MAX_TURNS)
     app.dependency_overrides[get_session_store] = lambda: store
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     estimation_calls = use_fake_estimation_llm(monkeypatch, [GOOD_ESTIMATION_PAYLOAD])
     use_fake_metadata_llm(monkeypatch, [EMPTY_METADATA_PAYLOAD])
     return store, estimation_calls

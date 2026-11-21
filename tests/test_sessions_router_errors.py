@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_session_store
+from app.dependencies import get_estimation_service, get_openai_client, get_session_store
+from app.domain.estimation_service import EstimationFailedError
+from app.generation.conversation.store import SessionStore
 from app.main import app
-from app.services.llm_service import EstimationFailedError
-from app.sessions.store import SessionStore
 from tests.sessions_helpers import EMPTY_METADATA_PAYLOAD, FakeOpenAIClient, use_fake_metadata_llm
 
 client = TestClient(app)
@@ -39,7 +39,7 @@ def test_estimate_returns_404_for_unknown_session():
 def test_estimate_rejects_transcript_with_pii(monkeypatch):
     store = SessionStore(max_conversation_turns=6)
     app.dependency_overrides[get_session_store] = lambda: store
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     use_fake_metadata_llm(monkeypatch, [EMPTY_METADATA_PAYLOAD])
     try:
         session_id = client.post("/sessions").json()["session_id"]
@@ -72,10 +72,11 @@ def test_estimate_returns_502_when_the_llm_fails(monkeypatch):
     store = SessionStore(max_conversation_turns=6)
     app.dependency_overrides[get_session_store] = lambda: store
 
-    def failing_estimate_conversational(**kwargs):
-        raise EstimationFailedError("No valid estimation after retries")
+    class FailingService:
+        def estimate_conversational(self, **kwargs):
+            raise EstimationFailedError("No valid estimation after retries")
 
-    monkeypatch.setattr("app.routers.sessions.estimate_conversational", failing_estimate_conversational)
+    monkeypatch.setitem(app.dependency_overrides, get_estimation_service, lambda: FailingService())
     try:
         session_id = client.post("/sessions").json()["session_id"]
         response = client.post(

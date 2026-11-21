@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_session_store
+from app.dependencies import get_openai_client, get_session_store
+from app.generation.conversation.store import SessionStore
 from app.main import app
-from app.sessions.store import SessionStore
 from tests.sessions_helpers import (
     EMPTY_METADATA_PAYLOAD,
     GOOD_ESTIMATION_PAYLOAD,
@@ -30,7 +30,7 @@ def _estimation_payload_that_reacts_to_the_attachment(messages: list[dict]) -> d
 def _setup(monkeypatch, estimation_payloads=None):
     store = SessionStore(max_conversation_turns=6)
     app.dependency_overrides[get_session_store] = lambda: store
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     estimation_calls = use_fake_estimation_llm(
         monkeypatch, estimation_payloads or [_estimation_payload_that_reacts_to_the_attachment]
     )

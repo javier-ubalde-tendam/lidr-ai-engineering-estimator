@@ -4,7 +4,7 @@ import pytest
 from docx import Document
 from fpdf import FPDF
 
-from app.attachments.extractor import (
+from app.foundation.attachments.extractor import (
     AttachmentExtractionError,
     UnsupportedAttachmentError,
     enrich_transcript,

@@ -6,10 +6,8 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.logging_config import configure_logging
-from app.prompts.loader import render_estimation_prompt
-from app.schemas.acb import ACBResponse
-from app.schemas.estimation import (
+from app.domain.schemas.acb import ACBResponse
+from app.domain.schemas.estimation import (
     OUT_OF_SCOPE_PREFIX,
     ConversationalEstimationResponse,
     DetailLevel,
@@ -18,6 +16,8 @@ from app.schemas.estimation import (
     OutputFormat,
     ProjectType,
 )
+from app.foundation.prompts.loader import render_estimation_prompt
+from app.logging_config import configure_logging
 
 configure_logging()
 

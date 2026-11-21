@@ -1,7 +1,7 @@
 import pytest
 
-from app.attachments.extractor import extract_text
-from app.guardrails.input import check_input
+from app.foundation.attachments.extractor import extract_text
+from app.foundation.guardrails.input import check_input
 from evals.stress.fixtures import build_pdfs
 
 

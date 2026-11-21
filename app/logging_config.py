@@ -24,6 +24,8 @@ def configure_logging() -> None:
         # Sin esto, structlog no filtra por nivel: imprimiría TRACE/DEBUG igual con LOG_LEVEL=INFO
         wrapper_class=structlog.make_filtering_bound_logger(settings.LOG_LEVEL),
         processors=[
+            # Añade al log lo ligado con bind_contextvars (p. ej. request_id del middleware)
+            structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
             renderer,

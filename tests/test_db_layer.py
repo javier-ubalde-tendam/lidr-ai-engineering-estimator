@@ -10,14 +10,22 @@ from app.config import (
     DatabaseSettings,
     Settings,
 )
-from app.db.models import TEXT_SEARCH_CONFIG, Base, Chunk, Document
-from app.db.session import dispose_engine, get_engine
+from app.foundation.persistence.database import dispose_engine, get_engine
+from app.foundation.persistence.models import Base
+from app.generation.rag.store.models import (
+    TEXT_SEARCH_CONFIG,
+    BudgetChunkRow,
+    Chunk,
+    ChunkRow,
+    Document,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
+COLLECTION_TABLES = ("budget_chunks", "transcript_chunks", "technical_doc_chunks")
 
 
 def test_tables_columns_and_nullability_match_the_spec() -> None:
-    documents, chunks = Base.metadata.tables["documents"], Base.metadata.tables["chunks"]
+    documents, chunks = Base.metadata.tables["documents"], Base.metadata.tables["budget_chunks"]
 
     assert set(documents.columns.keys()) == {
         "id", "source_path", "document_type", "ingested_at", "metadata",
@@ -42,21 +50,42 @@ def test_orm_uses_metadata_underscore_attribute_for_the_metadata_column() -> Non
 
 
 def test_indexes_are_relational_only_and_source_path_is_unique() -> None:
-    documents, chunks = Base.metadata.tables["documents"], Base.metadata.tables["chunks"]
+    documents, chunks = Base.metadata.tables["documents"], Base.metadata.tables["budget_chunks"]
     indexes = {index.name: index for index in [*documents.indexes, *chunks.indexes]}
 
     assert set(indexes) == {
         "ix_documents_source_path",
-        "ix_chunks_document_id",
-        "ix_chunks_chunk_type",
-        "ix_chunks_metadata_gin",
-        "ix_chunks_content_tsv",
+        "ix_budget_chunks_document_id",
+        "ix_budget_chunks_chunk_type",
+        "ix_budget_chunks_metadata_gin",
+        "ix_budget_chunks_content_tsv",
     }
     assert indexes["ix_documents_source_path"].unique
-    assert indexes["ix_chunks_metadata_gin"].dialect_options["postgresql"]["using"] == "gin"
-    assert indexes["ix_chunks_content_tsv"].dialect_options["postgresql"]["using"] == "gin"
-    # Ningún índice vectorial (HNSW/IVFFlat): la búsqueda exacta es el baseline
+    assert indexes["ix_budget_chunks_metadata_gin"].dialect_options["postgresql"]["using"] == "gin"
+    assert indexes["ix_budget_chunks_content_tsv"].dialect_options["postgresql"]["using"] == "gin"
+    # The HNSW indexes (migration 0004) are expression indexes on embedding::halfvec(1536) that
+    # the ORM does not declare: Alembic does not reflect expression indexes, so no drift
     assert all("embedding" not in index.columns for index in indexes.values())
+
+
+def test_three_collections_share_the_same_columns_and_indexes() -> None:
+    tables = {name: Base.metadata.tables[name] for name in COLLECTION_TABLES}
+
+    assert len({frozenset(table.columns.keys()) for table in tables.values()}) == 1
+    for name, table in tables.items():
+        assert {index.name for index in table.indexes} == {
+            f"ix_{name}_document_id",
+            f"ix_{name}_chunk_type",
+            f"ix_{name}_metadata_gin",
+            f"ix_{name}_content_tsv",
+        }
+        assert table.c.content_tsv.computed is not None
+        assert str(table.c.content_tsv.computed.sqltext) == (
+            f"to_tsvector('{TEXT_SEARCH_CONFIG}', content)"
+        )
+    # ORM-only compatibility aliases: Chunk/ChunkRow mean the budget collection
+    assert Chunk is ChunkRow is BudgetChunkRow
+    assert Chunk.__tablename__ == "budget_chunks"
 
 
 def test_embedding_model_other_than_the_contract_is_rejected() -> None:

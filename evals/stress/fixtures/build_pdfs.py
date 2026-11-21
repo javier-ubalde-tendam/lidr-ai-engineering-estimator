@@ -5,7 +5,7 @@
 
 Los PDFs se escriben en `evals/stress/fixtures/generated/` (ignorado por git). Son reproducibles:
 el texto sale de plantillas fijas sin aleatoriedad. Tras generarlos se mide con el MISMO
-extractor que usa la app (`app.attachments.extractor.extract_text`) cuántos caracteres salen y
+extractor que usa la app (`app.foundation.attachments.extractor.extract_text`) cuántos caracteres salen y
 cuántos sobrevivirían a `MAX_ATTACHMENT_CHARS`. Necesita fpdf2 (extra `dev`: `uv sync --extra dev`).
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.attachments.extractor import extract_text
+from app.foundation.attachments.extractor import extract_text
 
 FIXTURES_DIR = Path(__file__).parent / "generated"
 DEFAULT_SIZES_KB = (5, 20, 50, 100)

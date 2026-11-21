@@ -5,17 +5,17 @@ import openai
 import pytest
 
 from app.config import EMBEDDING_DIMENSION, SUPPORTED_EMBEDDING_MODEL
-from app.db.models import Chunk, Document
 from app.dependencies import get_embedder, get_ingestion_service, get_retriever
-from app.embedding_pipeline.chunker import JSONStructuralChunker
-from app.embedding_pipeline.errors import (
+from app.generation.rag.chunking.structural import JSONStructuralChunker
+from app.generation.rag.errors import (
     DocumentAlreadyIngestedError,
     InvalidEmbeddingError,
     ensure_valid_vectors,
 )
-from app.embedding_pipeline.ingestion import IngestionService, is_source_path_violation
-from app.embedding_pipeline.retriever import Retriever
-from app.embedding_pipeline.schemas import IngestRequest
+from app.generation.rag.ingest_service import IngestionService, is_source_path_violation
+from app.generation.rag.retriever import Retriever
+from app.generation.rag.schemas import IngestRequest
+from app.generation.rag.store.models import Chunk, Document
 from tests.embedding_helpers import FakeOpenAIClient, angle_vector, make_budget, make_embedder
 
 # Plugin pytest de anyio (viene con FastAPI): ejecuta los tests `async def` sin pytest-asyncio
@@ -197,3 +197,27 @@ def test_default_embedder_uses_the_contract_model(monkeypatch: pytest.MonkeyPatc
     embedder = get_embedder.__wrapped__()
 
     assert embedder._model == SUPPORTED_EMBEDDING_MODEL
+
+
+async def test_ingest_stamps_the_requested_chunk_type_and_the_module() -> None:
+    session, client = FakeSession(), FakeOpenAIClient()
+    budget = make_budget(n_components=2)
+    budget.components[0].module = "Payments"
+    request = IngestRequest(
+        source_path="data/task_corpus.json::TASK-1",
+        document_type="historical_task_breakdown",
+        chunk_type="historical_task",
+        content=budget,
+    )
+
+    await make_service(session, client).ingest(request)
+
+    _document, first, second = session.added
+    assert {first.chunk_type, second.chunk_type} == {"historical_task"}
+    assert first.metadata_["module"] == "Payments" and "Module: Payments\n" in first.content
+    # A component without a module keeps the budget chunk shape: no module line, no key
+    assert "module" not in second.metadata_ and "Module:" not in second.content
+
+
+def test_the_default_chunk_type_of_an_ingest_request_is_the_budget_one() -> None:
+    assert make_request().chunk_type == "budget_component"

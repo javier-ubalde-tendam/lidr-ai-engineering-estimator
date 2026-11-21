@@ -10,12 +10,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import SUPPORTED_EMBEDDING_MODEL
-from app.db.models import Chunk, Document
-from app.embedding_pipeline import ingestion
-from app.embedding_pipeline.chunker import JSONStructuralChunker
-from app.embedding_pipeline.errors import DocumentAlreadyIngestedError
-from app.embedding_pipeline.ingestion import IngestionService, is_source_path_violation
-from app.embedding_pipeline.schemas import IngestRequest
+from app.generation.rag import ingest_service as ingestion
+from app.generation.rag.chunking.structural import JSONStructuralChunker
+from app.generation.rag.errors import DocumentAlreadyIngestedError
+from app.generation.rag.ingest_service import IngestionService, is_source_path_violation
+from app.generation.rag.schemas import IngestRequest
+from app.generation.rag.store.models import Chunk, Document
 from tests.embedding_helpers import FakeOpenAIClient, make_budget, make_embedder
 from tests.integration.conftest import run
 
@@ -33,7 +33,7 @@ def payload(n_components: int = 3, source_path: str = SOURCE_PATH) -> dict[str, 
 
 
 def counts(sql: Callable[..., list[Any]]) -> tuple[int, int]:
-    row = sql("SELECT (SELECT count(*) FROM documents), (SELECT count(*) FROM chunks)")[0]
+    row = sql("SELECT (SELECT count(*) FROM documents), (SELECT count(*) FROM budget_chunks)")[0]
     return row[0], row[1]
 
 
@@ -58,7 +58,7 @@ def test_ingest_persists_document_and_chunks(
     assert document.ingested_at is not None
 
     chunks = sql(
-        "SELECT chunk_type, content, vector_dims(embedding) AS dims, metadata FROM chunks ORDER BY id"
+        "SELECT chunk_type, content, vector_dims(embedding) AS dims, metadata FROM budget_chunks ORDER BY id"
     )
     assert {chunk.chunk_type for chunk in chunks} == {"budget_component"}
     assert {chunk.dims for chunk in chunks} == {1536}

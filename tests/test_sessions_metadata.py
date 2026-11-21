@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_session_store
+from app.dependencies import get_openai_client, get_session_store
+from app.generation.conversation.store import SessionStore
 from app.main import app
-from app.sessions.store import SessionStore
 from tests.sessions_helpers import (
     GOOD_ESTIMATION_PAYLOAD,
     FakeOpenAIClient,
@@ -31,7 +31,7 @@ FORM_FIELDS = {"project_type": "web_saas", "detail_level": "summary", "output_fo
 def test_metadata_accumulates_across_turns_and_is_injected_in_the_next_system_prompt(monkeypatch):
     store = SessionStore(max_conversation_turns=6)
     app.dependency_overrides[get_session_store] = lambda: store
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     estimation_calls = use_fake_estimation_llm(monkeypatch, [GOOD_ESTIMATION_PAYLOAD])
     use_fake_metadata_llm(monkeypatch, [TURN_1_METADATA, TURN_2_METADATA])
 
@@ -73,7 +73,7 @@ def test_metadata_accumulates_across_turns_and_is_injected_in_the_next_system_pr
 def test_first_turn_system_prompt_shows_no_project_context_yet(monkeypatch):
     store = SessionStore(max_conversation_turns=6)
     app.dependency_overrides[get_session_store] = lambda: store
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     estimation_calls = use_fake_estimation_llm(monkeypatch, [GOOD_ESTIMATION_PAYLOAD])
     use_fake_metadata_llm(monkeypatch, [TURN_1_METADATA])
 

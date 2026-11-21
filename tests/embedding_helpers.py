@@ -3,8 +3,8 @@ from collections.abc import Callable
 from types import SimpleNamespace
 
 from app.config import EMBEDDING_DIMENSION, SUPPORTED_EMBEDDING_MODEL
-from app.embedding_pipeline.embedder import OpenAIEmbedder
-from app.embedding_pipeline.schemas import Budget
+from app.generation.rag.embedding.embedder import OpenAIEmbedder
+from app.generation.rag.schemas import Budget
 
 
 def make_budget(budget_id: str = "BUD-1", n_components: int = 2) -> Budget:

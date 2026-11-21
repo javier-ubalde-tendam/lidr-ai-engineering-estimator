@@ -62,7 +62,18 @@ def test_rerank_empty_candidates_does_not_call_the_model() -> None:
     reranker, fake = make_reranker({})
 
     assert reranker.rerank("q", [], top_n=5) == []
+    assert reranker.rerank_with_scores("q", [], top_n=5) == []
     assert fake.calls == []
+
+
+def test_rerank_with_scores_returns_raw_logits_best_first() -> None:
+    reranker, _ = make_reranker({"a": -2.0, "b": 3.5, "c": -0.5})
+    candidates = [Candidate(1, "a"), Candidate(2, "b"), Candidate(3, "c")]
+
+    scored = reranker.rerank_with_scores("q", candidates, top_n=2)
+
+    # Negative logits are exposed untouched: squashing them is the temporal stage's job
+    assert [(c.id, score) for c, score in scored] == [(2, 3.5), (3, -0.5)]
 
 
 def test_score_uses_a_single_predict_call_in_input_order() -> None:

@@ -15,7 +15,7 @@ from app.generation.rag.retrieval.pipeline import (
     retrieve,
 )
 from app.generation.rag.retrieval.reranker import CrossEncoderReranker
-from app.generation.rag.store import ChunkSearchStore
+from app.generation.rag.store.repository import ChunkSearchStore
 
 pytestmark = pytest.mark.anyio
 
@@ -167,9 +167,9 @@ async def test_config_d_hybrid_with_rerank() -> None:
 
 async def test_rerank_off_never_builds_the_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom() -> None:
-        raise AssertionError("get_reranker must not be called")
+        raise AssertionError("default_reranker must not be called")
 
-    monkeypatch.setattr("app.dependencies.get_reranker", boom)
+    monkeypatch.setattr("app.generation.rag.retrieval.pipeline.default_reranker", boom)
 
     await run(FakeStore(VECTOR), search_mode="hybrid", rerank=False)
 
@@ -178,7 +178,7 @@ async def test_rerank_on_without_injection_uses_the_app_singleton(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reranker, _ = fake_reranker({2: 1.0})
-    monkeypatch.setattr("app.dependencies.get_reranker", lambda: reranker)
+    monkeypatch.setattr("app.generation.rag.retrieval.pipeline.default_reranker", lambda: reranker)
 
     result = await run(FakeStore(VECTOR), rerank=True, recall_k=5, rerank_top_n=1)
 

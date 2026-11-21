@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.schemas.estimation import OUT_OF_SCOPE_PREFIX, EstimationResult
+from app.domain.schemas.estimation import OUT_OF_SCOPE_PREFIX, EstimationResult
 from evals.dataset import GoldenCase
 
 

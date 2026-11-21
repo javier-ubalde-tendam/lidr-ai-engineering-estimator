@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.estimation import EstimationRequest, EstimationResult, ProjectType
+from app.domain.schemas.estimation import EstimationRequest, EstimationResult, ProjectType
 
 VALID_FIELDS = {
     "description": "Aplicación web SaaS de facturación para pequeños negocios",

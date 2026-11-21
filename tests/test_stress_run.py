@@ -4,6 +4,8 @@ import json
 import httpx
 import pytest
 
+from app.dependencies import get_openai_client
+from app.main import app
 from evals.stress import run as stress_run
 from evals.stress.fixtures import build_pdfs
 from evals.stress.scenarios import SCENARIOS
@@ -42,7 +44,7 @@ def fixtures_dir(tmp_path, monkeypatch):
 
 
 def _setup(monkeypatch):
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     use_fake_estimation_llm(monkeypatch, [GOOD_ESTIMATION])
     use_fake_metadata_llm(monkeypatch, [METADATA_WITH_NAME])
     return use_fake_llm(monkeypatch)

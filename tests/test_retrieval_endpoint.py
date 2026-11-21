@@ -7,14 +7,20 @@ import openai
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routers import retrieval as retrieval_router
 from app.config import EMBEDDING_DIMENSION
-from app.db.session import get_db_session
-from app.dependencies import get_chunk_store, get_embedder, get_reranker
+from app.dependencies import (
+    get_chunk_store,
+    get_embedder,
+    get_reranker,
+    get_runtime_retrieval_config,
+)
+from app.foundation.persistence.database import get_db_session
 from app.generation.rag.errors import RetrievalError
 from app.generation.rag.retrieval.reranker import CrossEncoderReranker
 from app.generation.rag.schemas import RetrievalResult, RetrievedChunk
 from app.main import app
-from app.routers import retrieval as retrieval_router
+from tests.runtime_helpers import FakeRuntimeRetrievalConfig
 
 QUERY = "E-commerce checkout with cart and payments"
 
@@ -71,7 +77,7 @@ def embedder() -> FakeEmbedder:
 
 
 @pytest.fixture
-def client(embedder: FakeEmbedder) -> Iterator[TestClient]:
+def client(embedder: FakeEmbedder, retrieval_api_key: str) -> Iterator[TestClient]:
     async def no_session() -> Any:
         yield None
 
@@ -79,7 +85,8 @@ def client(embedder: FakeEmbedder) -> Iterator[TestClient]:
     app.dependency_overrides[get_embedder] = lambda: embedder
     app.dependency_overrides[get_chunk_store] = lambda: object()
     app.dependency_overrides[get_reranker] = lambda: CrossEncoderReranker("fake")
-    yield TestClient(app)
+    app.dependency_overrides[get_runtime_retrieval_config] = lambda: FakeRuntimeRetrievalConfig()
+    yield TestClient(app, headers={"X-API-Key": retrieval_api_key})
     app.dependency_overrides.clear()
 
 
@@ -229,7 +236,9 @@ def test_embedding_errors_are_502(
         {"distance_threshold": -0.1},
         {"distance_threshold": 2.1},
         {"search_mode": "keyword"},
-        {"sectors": ["finance"]},  # metadata filters are not exposed
+        {"unknown_field": "x"},  # extra fields are rejected
+        {"sectors": ["not-a-sector"]},
+        {"project_year_min": 2024, "project_year_max": 2020},
     ],
 )
 def test_invalid_requests_are_422(
@@ -245,3 +254,41 @@ def test_existing_search_endpoint_is_still_registered() -> None:
     paths = set(app.openapi()["paths"])
 
     assert {"/search", "/embeddings/ingest", "/v1/retrieval/search"} <= paths
+
+
+def test_metadata_filters_are_forwarded_to_retrieve(client: TestClient, spy: RetrieveSpy) -> None:
+    post(
+        client,
+        sectors=["finance", "healthcare"],
+        project_year_min=2022,
+        project_year_max=2024,
+        chunk_types=["budget_component"],
+    )
+
+    call = spy.calls[0]
+    assert call["sectors"] == ["finance", "healthcare"]
+    assert (call["project_year_min"], call["project_year_max"]) == (2022, 2024)
+    assert call["chunk_types"] == ["budget_component"]
+
+
+def test_filters_default_to_no_filtering(client: TestClient, spy: RetrieveSpy) -> None:
+    post(client)
+
+    call = spy.calls[0]
+    assert call["sectors"] is None and call["chunk_types"] is None
+    assert call["project_year_min"] is None and call["project_year_max"] is None
+
+
+def test_runtime_override_beats_environment_and_request_beats_runtime(
+    client: TestClient, spy: RetrieveSpy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_SEARCH_MODE", "vector")
+    monkeypatch.setenv("RERANKER_ENABLED", "false")
+    runtime = FakeRuntimeRetrievalConfig(search_mode="hybrid", rerank=True)
+    app.dependency_overrides[get_runtime_retrieval_config] = lambda: runtime
+
+    post(client)
+    post(client, search_mode="vector", rerank=False)
+
+    assert (spy.calls[0]["search_mode"], spy.calls[0]["rerank"]) == ("hybrid", True)
+    assert (spy.calls[1]["search_mode"], spy.calls[1]["rerank"]) == ("vector", False)

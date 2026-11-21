@@ -1,7 +1,11 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Placeholder default of PSEUDONYM_HASH_SALT; the app logs a warning at startup while it is in use
+DEV_PSEUDONYM_HASH_SALT = "dev-only-insecure-salt-change-me"
 
 # Contrato de esquema de la sesión 08: chunks.embedding es vector(1536). Cambiar de modelo, aunque
 # tenga la misma dimensión, obliga a re-embeber todo el corpus: nunca se mezclan modelos.
@@ -72,6 +76,85 @@ class Settings(BaseSettings):
     RRF_K: int = Field(default=60, ge=1)
     # "or" = any query lexeme matches (default); "and" = plainto_tsquery semantics (all lexemes)
     LEXICAL_MATCH_MODE: Literal["or", "and"] = "or"
+
+    # Session 9 - RAG estimation (transcript -> grounded estimate). Models go through LLMWrapper.
+    # Query understanding distills the transcript (small model); generation reasons over the
+    # retrieved budgets (strongest model).
+    REFORMULATION_MODEL: str = "gpt-5-mini"
+    GENERATION_MODEL: str = "gpt-5"
+    GENERATION_REASONING_EFFORT: Literal["minimal", "low", "medium", "high"] = "medium"
+    # Cap for reasoning + output tokens of the RAG structured calls: gpt-5 spends reasoning tokens
+    # from this same budget, so a small value truncates the JSON (finish_reason="length")
+    GENERATION_MAX_TOKENS: int = 64000
+    # Token budget of the assembled <source> context block (tiktoken cl100k_base)
+    MAX_CONTEXT_TOKENS: int = 16384
+    # Models selectable at runtime through PUT /api/v1/config/models, filtered by the configured keys
+    AVAILABLE_MODELS: list[str] = [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-5",
+        "gpt-5-mini",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-5",
+    ]
+    # Idempotency cache of POST /v1/estimate/from-transcript (seconds; 24h)
+    IDEMPOTENCY_TTL: int = 86400
+    # Keys of the secured routers. None/empty disables the router (401 on every request):
+    # generate a local key and put it in your .env
+    RETRIEVAL_API_KEY: str | None = None
+    ESTIMATE_API_KEY: str | None = None
+
+    # Session 10 live - advanced multi-index retrieval; each stage is independently switchable
+    RETRIEVAL_ROUTING_ENABLED: bool = True
+    QUERY_TRANSFORM_ENABLED: bool = True
+    # Soft re-weight; off by default: turn it on only with evidence (no magic-number boosts)
+    TEMPORAL_DECAY_ENABLED: bool = False
+    # Small non-reasoning models: cheap, and no reasoning-token budget to starve the JSON
+    ROUTER_MODEL: str = "gpt-4o-mini"
+    QUERY_TRANSFORM_MODEL: str = "gpt-4o-mini"
+    # weight = 0.5 ** (age / half_life); ~2.5 years because budgets age slowly
+    TEMPORAL_DECAY_HALF_LIFE_DAYS: int = 900
+    QUERY_MAX_SUBQUERIES: int = 4
+    ROUTER_MAX_TARGETS: int = 3
+    # Per-task hours (POST /v1/estimate/tasks/hours): neighbours per task and the cosine-distance
+    # floor beyond which a task gets NO hours (red flag) instead of a low-confidence guess
+    TASK_HOURS_TOP_K: int = 5
+    TASK_HOURS_DISTANCE_THRESHOLD: float = 0.45
+
+    # Session 11 live - generation quality
+    # Hallucination gate: proves each cited number is entailed by its chunk (numeric anchor + judge)
+    HALLUCINATION_GATE_ENABLED: bool = True
+    HALLUCINATION_JUDGE_MODEL: str = "gpt-5-mini"
+    # A grounded line whose hours deviate from the historical anchor by more than this fraction is degraded
+    HALLUCINATION_NUMERIC_TOLERANCE: float = 0.5
+    # Augmentation of the retrieved chunks BEFORE generation: compression + edge-loading reorder
+    AUGMENTATION_ENABLED: bool = True
+    AUGMENTATION_COMPRESS: bool = True
+    AUGMENTATION_REORDER: bool = True
+    AUGMENTATION_MODEL: str = "gpt-5-mini"
+    # Synthesis: when the sources disagree beyond this coefficient of variation, emit an hour range
+    SYNTHESIS_ENABLED: bool = True
+    SYNTHESIS_CONTRADICTION_THRESHOLD: float = 0.35
+
+    # Session 7 live - chunking strategies that call an LLM (POST /embeddings/compare)
+    # Decomposes each component into atomic propositions (one call per component): a small model
+    PROPOSITIONAL_CHUNKER_MODEL: str = "gpt-4o-mini"
+    # Situates each chunk inside its parent budget (Anthropic prompt caching on the parent document)
+    CONTEXTUAL_CHUNKER_MODEL: str = "claude-sonnet-4-5"
+
+    # Session 6 - offline ingestion (catalog -> loaders -> parsers; PII pseudonymization)
+    # YAML catalog of audited data sources, resolved relative to the working directory
+    CATALOG_PATH: Path = Path("data/catalog/catalog.yaml")
+    # Root the catalog ``location`` entries are resolved against
+    INGESTION_DATA_ROOT: Path = Path("data/seed")
+    # spaCy model of the Presidio analyzer. It must be Spanish: the default English pipeline
+    # silently misses Hispanic names. The model is a separate wheel (see README / Dockerfile)
+    PRESIDIO_SPACY_MODEL: str = "es_core_news_md"
+    PSEUDONYM_FAKER_LOCALE: str = "es_ES"
+    # Salt of the HMAC that keys pseudonym_mappings. This default is a DEV PLACEHOLDER: anyone who
+    # knows it can recompute the hashes of known values. Set a long random secret in the real .env.
+    # Rotating it orphans every existing mapping (known values get NEW pseudonyms afterwards)
+    PSEUDONYM_HASH_SALT: str = DEV_PSEUDONYM_HASH_SALT
 
     @model_validator(mode="after")
     def validate_embedding_model(self) -> "Settings":

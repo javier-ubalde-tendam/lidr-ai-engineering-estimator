@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 from instructor.core.exceptions import InstructorRetryException
 
-from app.schemas.critic import CriticFeedback
-from app.services.llm_wrapper import (
+from app.domain.schemas.critic import CriticFeedback
+from app.foundation.llm.wrapper import (
     MODEL_COSTS,
     LLMCallMeta,
     build_call_meta,

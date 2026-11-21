@@ -1,25 +1,44 @@
 [project]
 name = "lidr-ai-engineering-estimator"
 version = "0.1.0"
-description = "AI-powered project estimation tool - Session 05 (conversational memory + attachments)"
+description = "AI-powered project estimation tool - layered architecture aligned up to Session 11 (RAG, hybrid multi-index retrieval, generation quality)"
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.13",
+    # Session 7 live: Contextual Retrieval chunker (prompt caching needs the native SDK)
+    "anthropic>=0.40",
     "asyncpg>=0.29",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "instructor[litellm]>=1.17.0",
     "jinja2>=3.1.6",
+    # Session 7 live: chunking strategies comparison (recursive / semantic splitters)
+    "langchain-experimental>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-text-splitters>=0.3.0",
     "litellm>=1.83.0",
+    # Sentence tokenizer of the sentence-window chunker (punkt data is fetched lazily)
+    "nltk>=3.9",
     "openai>=3.3.0",
+    # Session 6 offline ingestion: tabular cleaning + validation, YAML catalog, PII pseudonymization.
+    # The spaCy model (es_core_news_md) is a separate wheel, not a PyPI dependency: see README/Dockerfile
+    "faker>=24.0",
+    "pandas>=2.2",
+    "pandera>=0.20",
     "pgvector>=0.3",
+    "presidio-analyzer>=2.2",
+    "presidio-anonymizer>=2.2",
     "pydantic-settings>=2.15.0",
     "pypdf>=5.1.0",
     "python-docx>=1.1.2",
     "python-multipart>=0.0.20",
+    "pyyaml>=6.0",
     "redis>=8.1.0",
     "redisvl>=0.27.2",
     "sentence-transformers>=3.0",
+    "spacy>=3.7",
+    # Per-API-key rate limiting of the secured routers
+    "slowapi>=0.1.9",
     "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
@@ -49,6 +68,10 @@ dev = [
     "ruff",
     "mypy",
     "fpdf2>=2.8.9",
+    "fakeredis>=2.20",
+    # Session 11: RAGAS generation-quality evaluation (scripts/eval_*_s11.py; paid, never run in CI)
+    "ragas>=0.2",
+    "datasets>=2.19",
 ]
 
 [tool.pytest.ini_options]

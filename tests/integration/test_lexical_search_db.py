@@ -8,8 +8,8 @@ from alembic.config import Config
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from alembic import command
-from app.db.models import TEXT_SEARCH_CONFIG, Chunk, Document
-from app.generation.rag.store import ChunkSearchStore
+from app.generation.rag.store.models import TEXT_SEARCH_CONFIG, Chunk, Document
+from app.generation.rag.store.repository import ChunkSearchStore
 from tests.embedding_helpers import angle_vector
 from tests.integration.conftest import ROOT, run
 
@@ -59,9 +59,11 @@ def lexical(
 def test_migration_creates_generated_column_and_gin_index(sql: Callable[..., list[Any]]) -> None:
     (column,) = sql(
         "SELECT data_type, is_generated, generation_expression FROM information_schema.columns "
-        "WHERE table_name = 'chunks' AND column_name = 'content_tsv'"
+        "WHERE table_name = 'budget_chunks' AND column_name = 'content_tsv'"
     )
-    (index,) = sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_chunks_content_tsv'")
+    (index,) = sql(
+        "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_budget_chunks_content_tsv'"
+    )
 
     assert column.data_type == "tsvector"
     assert column.is_generated == "ALWAYS"
@@ -75,7 +77,7 @@ def test_column_is_filled_automatically_on_insert(
 ) -> None:
     seed(session_factory, [CART_CHUNK])
 
-    (row,) = sql("SELECT content_tsv::text AS tsv FROM chunks")
+    (row,) = sql("SELECT content_tsv::text AS tsv FROM budget_chunks")
 
     # english stemming: "checkout" -> 'checkout', "promotions" -> 'promot'
     assert "'checkout'" in row.tsv and "'promot'" in row.tsv
@@ -139,7 +141,7 @@ def test_downgrade_and_upgrade_on_a_populated_table(
     finally:
         command.upgrade(config, "head")
 
-    (row,) = sql("SELECT content_tsv IS NOT NULL AS filled FROM chunks")
+    (row,) = sql("SELECT content_tsv IS NOT NULL AS filled FROM budget_chunks")
     assert row.filled is True
 
 

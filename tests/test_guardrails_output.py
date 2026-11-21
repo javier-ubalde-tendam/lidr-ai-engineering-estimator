@@ -1,10 +1,10 @@
-from app.guardrails.output import enforce_scope_response
-from app.schemas.estimation import (
+from app.domain.schemas.estimation import (
     LOW_CONFIDENCE_THRESHOLD,
     OUT_OF_SCOPE_PREFIX,
     EstimationResult,
     Phase,
 )
+from app.foundation.guardrails.output import enforce_scope_response
 
 GOOD_PHASES = [
     Phase(name="Design", duration_weeks=2, cost_eur=4000, summary="Design the platform."),

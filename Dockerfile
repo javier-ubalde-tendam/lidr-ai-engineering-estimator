@@ -26,6 +26,22 @@ RUN uv sync --frozen --no-dev --no-install-project --no-cache
 # El vocabulario BPE se descarga al construir la imagen, no en el primer arranque
 RUN python -c "import tiktoken; tiktoken.encoding_for_model('text-embedding-3-small')"
 
+# Sentence tokenizer of the sentence-window chunker (POST /embeddings/compare). Best effort: if the
+# download fails here, the chunker fetches it lazily on first use
+ENV NLTK_DATA=/opt/nltk_data
+RUN python -c "import nltk; nltk.download('punkt_tab', download_dir='/opt/nltk_data', quiet=True)"
+
+# Spanish spaCy model of the Presidio analyzer (offline ingestion, PII pseudonymization). It is a
+# wheel hosted on GitHub, not on PyPI, so it is not part of uv.lock. ~40 MB; build with
+# `--build-arg INSTALL_SPACY_MODEL=false` to skip it (the app still starts; only the PII
+# analyzer needs it, and it fails there with a clear "model not found" error). The wheel version
+# must match the locked spaCy minor (3.8.x). Not a best-effort step: a failed download fails the build
+ARG INSTALL_SPACY_MODEL=true
+ARG SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/es_core_news_md-3.8.0/es_core_news_md-3.8.0-py3-none-any.whl
+RUN if [ "$INSTALL_SPACY_MODEL" = "true" ]; then \
+        VIRTUAL_ENV=/opt/venv uv pip install --no-cache "$SPACY_MODEL_URL"; \
+    fi
+
 RUN useradd --create-home --uid 1000 app && chown app:app /app
 # Cross-encoder weights cache (session 10). Created here owned by `app` so the named volume
 # mounted on top inherits these permissions on first use (the model is not baked into the image)

@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from app.schemas.observation import TurnObservation
+from app.domain.schemas.observation import TurnObservation
 from evals.run import _client_for_case  # mismo cliente HTTP / in-process que los evals dorados
 from evals.stress.fixtures.build_pdfs import DEFAULT_SIZES_KB, fixture_path
 from evals.stress.metrics import CostBudgetMetric, LatencyBudgetMetric, MemoryDriftMetric

@@ -1,7 +1,7 @@
 import pytest
 
-from app.sessions.compression.anchors import AnchorDetector
-from app.sessions.models import Message
+from app.generation.conversation.compression.anchors import AnchorDetector
+from app.generation.conversation.models import Message
 from tests.sessions_helpers import use_fake_llm
 
 

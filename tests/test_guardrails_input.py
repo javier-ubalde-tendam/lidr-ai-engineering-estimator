@@ -1,6 +1,6 @@
 import pytest
 
-from app.guardrails.input import InputGuardrailViolation, check_input
+from app.foundation.guardrails.input import InputGuardrailViolation, check_input
 
 LEGIT_DESCRIPTION = (
     "Aplicacion movil de reservas para un gimnasio con pagos online, incluye backend "

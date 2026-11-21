@@ -13,6 +13,7 @@ the lazy loader, so app startup and unit tests never pay for them.
 import threading
 import time
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any, TypeVar
 
 import structlog
@@ -76,6 +77,28 @@ class CrossEncoderReranker:
         scores = model.predict([(query, document) for document in documents])
         return [float(score) for score in scores]
 
+    def rerank_with_scores(
+        self,
+        query: str,
+        candidates: Sequence[T],
+        *,
+        top_n: int,
+        text_of: Callable[[T], str] = _content_of,
+    ) -> list[tuple[T, float]]:
+        """Sort candidates by cross-encoder score (descending); return ``(candidate, score)``.
+
+        The raw score (a logit, may be negative) is exposed so a later stage can weight finalists
+        by a real relevance number instead of by position. ``sorted`` is stable, so equal scores
+        keep the recall order.
+        """
+        if not candidates:
+            return []
+        scores = self.score(query, [text_of(candidate) for candidate in candidates])
+        ranked = sorted(
+            zip(candidates, scores, strict=True), key=lambda pair: pair[1], reverse=True
+        )
+        return ranked[:top_n]
+
     def rerank(
         self,
         query: str,
@@ -84,14 +107,12 @@ class CrossEncoderReranker:
         top_n: int,
         text_of: Callable[[T], str] = _content_of,
     ) -> list[T]:
-        """Sort candidates by cross-encoder score (descending) and keep the first ``top_n``.
+        """Sort candidates by cross-encoder score (descending) and keep the first ``top_n``."""
+        scored = self.rerank_with_scores(query, candidates, top_n=top_n, text_of=text_of)
+        return [candidate for candidate, _ in scored]
 
-        ``sorted`` is stable, so equal scores keep the recall order.
-        """
-        if not candidates:
-            return []
-        scores = self.score(query, [text_of(candidate) for candidate in candidates])
-        ranked = sorted(
-            zip(candidates, scores, strict=True), key=lambda pair: pair[1], reverse=True
-        )
-        return [candidate for candidate, _ in ranked[:top_n]]
+
+@lru_cache
+def default_reranker() -> CrossEncoderReranker:
+    """Process-wide singleton: the model loads once, on the first rerank."""
+    return CrossEncoderReranker.from_settings()

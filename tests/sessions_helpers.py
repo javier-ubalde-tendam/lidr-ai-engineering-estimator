@@ -129,7 +129,7 @@ _current_fake: tuple[FakeLLM, object] | None = None
 def use_fake_llm(monkeypatch) -> FakeLLM:
     """Instala (una vez por test) el FakeLLM en llm_wrapper; llamadas repetidas devuelven el mismo."""
     global _current_fake
-    from app.services import llm_wrapper
+    from app.foundation.llm import wrapper as llm_wrapper
 
     if _current_fake is not None and llm_wrapper._structured_client is _current_fake[1]:
         return _current_fake[0]

@@ -1,4 +1,9 @@
-from app.sessions.models import SUMMARY_PREFIX, ConversationHistory, Message, ProjectMetadata
+from app.generation.conversation.models import (
+    SUMMARY_PREFIX,
+    ConversationHistory,
+    Message,
+    ProjectMetadata,
+)
 
 
 def test_history_append_adds_a_user_assistant_pair():

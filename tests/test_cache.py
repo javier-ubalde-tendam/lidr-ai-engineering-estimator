@@ -1,6 +1,6 @@
-from app.cache import build_cache_key
-from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import DetailLevel, EstimationRequest, OutputFormat, ProjectType
+from app.domain.schemas.estimation import DetailLevel, EstimationRequest, OutputFormat, ProjectType
+from app.foundation.prompts.loader import render_estimation_prompt
+from app.generation.cag.exact import build_cache_key
 
 
 def make_request(**overrides) -> EstimationRequest:

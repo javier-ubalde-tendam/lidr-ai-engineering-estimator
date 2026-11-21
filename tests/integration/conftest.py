@@ -20,9 +20,9 @@ from sqlalchemy.pool import NullPool
 
 from alembic import command
 from app.config import DatabaseSettings
-from app.db.session import get_db_session
 from app.dependencies import get_chunker, get_embedder
-from app.embedding_pipeline.chunker import JSONStructuralChunker
+from app.foundation.persistence.database import get_db_session
+from app.generation.rag.chunking.structural import JSONStructuralChunker
 from app.main import app
 from tests.embedding_helpers import FakeOpenAIClient, make_embedder
 
@@ -98,7 +98,12 @@ def sql(session_factory: async_sessionmaker[AsyncSession]) -> Callable[..., list
 def clean_tables(session_factory: async_sessionmaker[AsyncSession]) -> None:
     async def truncate() -> None:
         async with session_factory() as session, session.begin():
-            await session.execute(text("TRUNCATE chunks, documents RESTART IDENTITY CASCADE"))
+            await session.execute(
+                text(
+                    "TRUNCATE budget_chunks, transcript_chunks, technical_doc_chunks, documents "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
 
     run(truncate())
 

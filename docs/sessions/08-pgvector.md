@@ -48,7 +48,7 @@ no se fija `name:` para mantener el volumen `lidr-ai-engineering-estimator_lidr-
 
 ## Esquema
 
-Ver la migración `alembic/versions/0001_documents_chunks_pgvector.py` y los modelos `app/db/models.py`
+Ver la migración `alembic/versions/0001_documents_chunks_pgvector.py` y los modelos `app/generation/rag/store/models.py`
 (el atributo `metadata_` se mapea a la columna `metadata`, porque `metadata` está reservado en SQLAlchemy
 declarativo). `alembic check` no detecta diferencias entre modelo y migración. El `downgrade` no elimina
 la extensión `vector`, que puede ser compartida.

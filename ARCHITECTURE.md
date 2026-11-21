@@ -1,0 +1,164 @@
+# Arquitectura del estimador
+
+Este documento es el **contrato de arquitectura** del servicio (adaptado del de la solución de
+referencia del profesor a este proyecto). El código de cada sesión nueva debe respetarlo. Si una
+pieza no encaja en ninguna capa, primero se decide dónde vive (y se actualiza este documento), no se
+crea otra carpeta suelta en la raíz. Las reglas de dependencias las **vigila un test**:
+[tests/test_layering.py](tests/test_layering.py) recorre `app/` con `ast` y falla si un import las viola.
+
+## 1. Las tres arquitecturas de IA (y por qué componen)
+
+- **CAG — Cache-Augmented Generation** (`app/generation/cag/`). Responde sin tocar el LLM cuando ya
+  hay una respuesta equivalente: primero un acierto exacto (SHA-256), luego uno por similitud vectorial.
+- **RAG — Retrieval-Augmented Generation** (`app/generation/rag/`). Corpus de presupuestos,
+  transcripciones y documentación técnica → chunks + embeddings en PostgreSQL/pgvector → recuperación
+  (vectorial, híbrida, multi-índice, reranking) → estimación citable.
+- **Agéntica** (`app/generation/agentic/`). Bucle Actor-Crítico-Boss que audita la estimación apoyado
+  en la conversación multi-turno (`app/generation/conversation/`).
+
+**Tesis central**: estas tres capas no se conocen entre sí. **Componen únicamente a través del
+conductor** (`app/domain/estimation_service.py`).
+
+## 2. El pastel de capas
+
+```
+app/
+├── main.py                 # factory FastAPI, lifespan, middleware X-Request-ID, rate limiter
+├── config.py               # Settings (pydantic-settings)
+├── dependencies.py         # composition root: factories cacheadas y servicios por petición
+├── logging_config.py       # structlog (propio de este proyecto)
+│
+├── foundation/             # plomería sin opinión de arquitectura AI
+│   ├── llm/                #   wrapper.py (LLMWrapper + call_structured), streaming.py, runtime_config.py (overrides en Redis)
+│   ├── prompts/            #   loader Jinja2 + plantillas versionadas (estimation/v1..v4, critic, ...)
+│   ├── guardrails/         #   input (moderación + injection + PII) / output (filtro de scope)
+│   ├── attachments/        #   extracción de texto de PDF/DOCX
+│   └── persistence/        #   engine/sesiones async, Base declarativa, filas y repositorios de ingesta
+│
+├── domain/                 # contrato + conductor
+│   ├── schemas/            #   EstimationRequest/Result/Response, ACBResponse, CriticFeedback, ...
+│   └── estimation_service.py  # EstimationService — ÚNICO punto de composición
+│
+├── generation/
+│   ├── cag/                #   exact.py + semantic.py
+│   ├── rag/                #   chunking/ embedding/ analysis/ store/ retrieval/ quality/ + estimator, validation, ...
+│   ├── agentic/            #   boss.py + critic.py
+│   └── conversation/       #   models, store, metadata_extractor, tier_resolver, compression/
+│
+├── ingestion/              # pipeline batch offline (catálogo, parsers, limpieza, PII)
+│
+└── api/                    # transporte: routers finos, sin lógica de negocio
+    ├── estimations.py, sessions.py, embeddings.py, search.py, ingestion.py, config.py
+    ├── security.py, rate_limiting.py, errors.py, request_context.py
+    └── routers/            #   retrieval, retrieval_advanced, estimate, estimate_stages, estimate_tasks, corpus_index
+```
+
+## 3. Reglas de dependencias (MUST / MUST NOT)
+
+| Capa | PUEDE importar | NO PUEDE importar |
+|---|---|---|
+| `config.py` | (nada interno) | todo |
+| `foundation/*` | `config`, `logging_config` | `domain`, `generation`, `ingestion`, `api` |
+| `domain/schemas/*` | `config`, `foundation` | `generation`, `api` |
+| `generation/<x>/*` | `config`, `foundation`, `domain/schemas`, su propio paquete | `api`, `dependencies`, el conductor, **otro hermano de `generation`** |
+| `domain/estimation_service.py` (CONDUCTOR) | todos los hermanos de `generation`, `foundation`, `schemas` | `api`, `dependencies` |
+| `ingestion/*` | `config`, `foundation`, `domain/schemas`, `generation` | `api`, el conductor |
+| `api/*` | `dependencies`, `domain`, `foundation`, tipos y servicios de `generation` | lógica de negocio |
+| `dependencies.py` (COMPOSITION ROOT) | cualquier capa | (lo importan solo `api/` y los tests) |
+| `main.py` | `api`, `foundation`, `config` | — |
+
+**Aristas especiales**: `agentic` **puede** importar `conversation` (la inversa está prohibida); los
+hermanos de `generation` se encuentran **solo** en el conductor.
+
+**Excepciones documentadas** (lista corta en `ALLOWED_EXCEPTIONS` del test; cada una es deuda técnica):
+`foundation.guardrails.output` y `foundation.prompts.loader` dependen de `domain.schemas`, y el loader
+de `generation.conversation.models` (tipos de valor), igual que en la solución del profesor.
+
+**Colaboradores inyectados**: dentro de `generation/` no se hace `from app.dependencies import ...`
+(service locator). Los servicios reciben sus colaboradores por constructor/parámetro
+(`TranscriptEstimator`, `TaskHoursEstimator`, `advanced_retrieve(...)`) y `dependencies.py` los cablea.
+
+## 4. El conductor
+
+`EstimationService` tiene cuatro entradas:
+
+- `estimate()` — guardrails(in) → prompt → llm → guardrails(out). Sin cachés (como antes).
+- `estimate_stream()` — guardrails(in) → cag exacto → cag semántico → prompt → llm (stream) → guardrails(out) → cag.store.
+- `estimate_conversational()` — conversation (historial + metadata + compresión) → prompt → llm → guardrails(out).
+- `estimate_with_acb()` — agentic (Boss orquesta Actor + Critic sobre la conversación).
+
+Los endpoints RAG de las sesiones 9-11 (`/v1/estimate/from-transcript`, `/v1/estimate/stages/*`,
+`/v1/estimate/tasks/hours`, `/v1/retrieval/*`) no mezclan hermanos de `generation` (solo RAG): los
+sirven directamente `TranscriptEstimator` / `TaskHoursEstimator` / `retrieve()`. **Cuando RAG entre en
+el camino de `EstimationService`** (o lo haga un agente en la sesión 12) el paso se añade **en el
+conductor**, nunca con un import cruzado entre hermanos.
+
+## 5. Composition root
+
+`dependencies.py` y `config.py` viven en la raíz, por encima de las capas. Factories cacheadas
+(`get_openai_client`, `get_llm_wrapper`, `get_cache`, `get_session_store`, `get_embedder`,
+`get_chunk_store`, `get_reranker`, `get_runtime_config`, ...) y servicios por petición
+(`get_estimation_service`, `get_transcript_estimator`, `get_ingestion_service`, ...). Los tests
+sustituyen piezas con `app.dependency_overrides[get_xxx] = lambda: Fake()`.
+
+## 6. Camino de la petición principal
+
+```
+POST /api/v1/estimate
+  └→ app/api/estimations.py                          (HTTP fino, mapeo de errores: 400/502/422)
+       └→ EstimationService.estimate()
+            1. foundation/guardrails/input.py        (moderación + injection + PII)
+            2. foundation/prompts/loader.py          (Jinja2 versionado)
+            3. foundation/llm/wrapper.py             (Instructor + validators + re-prompt)
+            4. foundation/guardrails/output.py       (filtro de scope)
+            5. return EstimationResponse(result, prompt_version)
+```
+
+## 7. ¿Dónde va mi código nuevo?
+
+| Si añades… | Va en… |
+|---|---|
+| Backend LLM, plantilla de prompt, guardrail nuevo | `foundation/` |
+| Retrieval, chunking, vector store, embeddings, calidad de generación | `generation/rag/` |
+| Rol de agente, tools del agente o paso de orquestación | `generation/agentic/` |
+| Estrategia de cache | `generation/cag/` |
+| Memoria conversacional | `generation/conversation/` |
+| Endpoint HTTP | `api/` (fino) + factory en `dependencies.py` |
+| Composición entre capas | método en `EstimationService` (`domain/`), **nunca** import cruzado |
+| Fuente de datos / parser / limpieza offline | `ingestion/` |
+
+## 8. Contratos públicos que NO se rompen
+
+`POST /api/v1/estimate`, `POST /api/v1/estimate/stream`, `/sessions`, `/sessions/{id}`,
+`/sessions/{id}/memory`, `/sessions/{id}/estimate`, `/sessions/{id}/estimate-acb`,
+`POST /embeddings/ingest`, `POST /search`, `POST /v1/retrieval/search` (solo se añaden campos),
+`GET /health`. Las formas JSON de `EstimationResponse`, `ACBResponse`, `SessionInfoResponse` y
+`RetrievalResult` no cambian. `EstimationResult` mantiene el orden de campos que necesita Instructor y
+sus `model_validator` (disparan el re-prompt).
+
+## Apéndice — Mapa de migración de rutas (mi ruta anterior → ahora)
+
+| Antes | Ahora |
+|---|---|
+| `app/services/llm_service.py` | `app/domain/estimation_service.py` (+ `app/foundation/llm/streaming.py`) |
+| `app/services/llm_wrapper.py` | `app/foundation/llm/wrapper.py` |
+| `app/services/boss.py`, `critic.py` | `app/generation/agentic/boss.py`, `critic.py` |
+| `app/guardrails/*` | `app/foundation/guardrails/*` |
+| `app/prompts/*` | `app/foundation/prompts/*` |
+| `app/attachments/*` | `app/foundation/attachments/*` |
+| `app/db/session.py` | `app/foundation/persistence/database.py` |
+| `app/db/models.py` (`Base`) | `app/foundation/persistence/models.py` |
+| `app/db/models.py` (`Document`, `Chunk`) | `app/generation/rag/store/models.py` |
+| `app/schemas/*` | `app/domain/schemas/*` |
+| `app/sessions/*` | `app/generation/conversation/*` |
+| `app/cache.py` | `app/generation/cag/exact.py` |
+| `app/semantic_cache.py` | `app/generation/cag/semantic.py` |
+| `app/embedding_pipeline/chunker.py` | `app/generation/rag/chunking/structural.py` |
+| `app/embedding_pipeline/embedder.py` | `app/generation/rag/embedding/embedder.py` |
+| `app/embedding_pipeline/ingestion.py` | `app/generation/rag/ingest_service.py` |
+| `app/embedding_pipeline/repository.py` + `generation/rag/store.py` | `app/generation/rag/store/repository.py` |
+| `app/embedding_pipeline/retriever.py` | `app/generation/rag/retriever.py` |
+| `app/embedding_pipeline/{schemas,errors}.py` | `app/generation/rag/{schemas,errors}.py` (fusionados con los de retrieval) |
+| `app/embedding_pipeline/router.py` | `app/api/embeddings.py` (ingest, compare) y `app/api/search.py` (`/search`) |
+| `app/routers/estimations.py`, `sessions.py` | `app/api/estimations.py`, `app/api/sessions.py` |
+| `app/routers/retrieval.py` | `app/api/routers/retrieval.py` |

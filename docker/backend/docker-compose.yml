@@ -3,8 +3,14 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+      args:
+        # Set INSTALL_SPACY_MODEL=false in the shell to build without the ~40 MB Spanish spaCy model
+        INSTALL_SPACY_MODEL: ${INSTALL_SPACY_MODEL:-true}
     image: lidr-estimator:local
     env_file:
+      # Aquí llegan TODAS las variables de .env (RETRIEVAL_API_KEY, ESTIMATE_API_KEY, *_MODEL,
+      # RETRIEVAL_*, HALLUCINATION_*, ...). No se redeclaran en `environment:` porque la
+      # interpolación ${VAR:-x} de Compose no lee este .env y pisaría los valores con el default
       - ../../.env
     environment:
       # Prevalecen sobre .env: dentro de Docker los servicios se resuelven por nombre, no por localhost

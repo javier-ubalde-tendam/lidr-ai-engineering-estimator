@@ -1,5 +1,7 @@
 import json
 
+from app.dependencies import get_openai_client
+from app.main import app
 from evals import run as evals_run
 from evals.dataset import load_dataset
 from tests.sessions_helpers import FakeOpenAIClient, use_fake_llm
@@ -23,7 +25,7 @@ def _cases():
 
 
 def _setup(monkeypatch):
-    monkeypatch.setattr("app.services.llm_service.get_openai_client", FakeOpenAIClient)
+    monkeypatch.setitem(app.dependency_overrides, get_openai_client, lambda: FakeOpenAIClient())
     return use_fake_llm(monkeypatch)
 
 

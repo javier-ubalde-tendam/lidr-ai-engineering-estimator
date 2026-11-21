@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings
 from app.dependencies import get_openai_client
-from app.embedding_pipeline.embedder import OpenAIEmbedder
+from app.generation.rag.embedding.embedder import OpenAIEmbedder
 
 MISSING_KEY_MESSAGE = "Error: falta OPENAI_API_KEY (defínela en el .env de la raíz del repo)"
 

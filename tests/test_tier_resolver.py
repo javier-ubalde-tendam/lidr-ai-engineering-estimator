@@ -1,8 +1,8 @@
 import pytest
 
-from app.sessions import tier_resolver
-from app.sessions.models import ProjectMetadata
-from app.sessions.tier_resolver import Tier, TierRule, resolve_tier
+from app.generation.conversation import tier_resolver
+from app.generation.conversation.models import ProjectMetadata
+from app.generation.conversation.tier_resolver import Tier, TierRule, resolve_tier
 
 NEUTRAL = "We want a booking portal for a small gym with a member calendar."
 

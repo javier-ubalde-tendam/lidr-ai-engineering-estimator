@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.dependencies import get_ingestion_service, get_retriever
-from app.embedding_pipeline.errors import DocumentAlreadyIngestedError, InvalidEmbeddingError
-from app.embedding_pipeline.schemas import (
+from app.generation.rag.errors import DocumentAlreadyIngestedError, InvalidEmbeddingError
+from app.generation.rag.schemas import (
     IngestRequest,
     IngestResponse,
     SearchResponse,

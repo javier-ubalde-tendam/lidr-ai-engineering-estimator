@@ -6,9 +6,9 @@ import httpx
 import openai
 import pytest
 
-from app.embedding_pipeline.chunker import JSONStructuralChunker
-from app.embedding_pipeline.embedder import BATCH_SIZE, OpenAIEmbedder, estimate_cost_usd
-from app.embedding_pipeline.schemas import Chunk
+from app.generation.rag.chunking.structural import JSONStructuralChunker
+from app.generation.rag.embedding.embedder import BATCH_SIZE, OpenAIEmbedder, estimate_cost_usd
+from app.generation.rag.schemas import Chunk
 from tests.embedding_helpers import make_budget
 
 ROOT = Path(__file__).resolve().parent.parent

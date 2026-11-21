@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -46,13 +47,17 @@ def test_percentile_invalid(pct: float) -> None:
         percentile([], 50)
 
 
+def load_golden() -> dict[str, Any]:
+    return json.loads((ROOT / "evals" / "golden_retrieval.json").read_text(encoding="utf-8"))
+
+
 def test_golden_set_shape_and_ids_exist_in_the_corpus() -> None:
-    golden = json.loads((ROOT / "evals" / "golden_retrieval.json").read_text(encoding="utf-8"))
     corpus = json.loads((ROOT / "data" / "budgets_sample.json").read_text(encoding="utf-8"))
     budget_ids = {budget["budget_id"] for budget in corpus}
     sectors = {budget["client_metadata"]["sector"] for budget in corpus}
 
-    queries = golden["queries"]
+    # The original budget-only entries (the A-D evaluation); the teacher's carry relevant_source_ids
+    queries = [q for q in load_golden()["queries"] if "relevant_source_ids" not in q]
     assert len(queries) == 5
     assert len({q["id"] for q in queries}) == 5
     for query in queries:
@@ -61,3 +66,22 @@ def test_golden_set_shape_and_ids_exist_in_the_corpus() -> None:
         assert query["note"]
     # Every sector of the corpus is covered by at least one query
     assert {q["sector"] for q in queries} == sectors
+
+
+def test_merged_multi_index_entries_point_to_existing_documents() -> None:
+    def ids(path: str, key: str) -> set[str]:
+        return {doc[key] for doc in json.loads((ROOT / path).read_text(encoding="utf-8"))}
+
+    known = (
+        ids("data/budgets_sample.json", "budget_id")
+        | ids("data/transcripts_sample.json", "transcript_id")
+        | ids("data/technical_docs_sample.json", "doc_id")
+    )
+    queries = load_golden()["queries"]
+    merged = [q for q in queries if "relevant_source_ids" in q]
+
+    assert [q["id"] for q in merged] == [f"Q{n}" for n in range(1, 9)]
+    assert len({q["id"] for q in queries}) == len(queries)  # no id collision with my entries
+    for query in merged:
+        assert query["relevant_source_ids"]
+        assert set(query["relevant_source_ids"]) <= known
