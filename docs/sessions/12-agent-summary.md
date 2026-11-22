@@ -26,7 +26,7 @@ Ninguna fase BLOCKED.
 - `scripts/run_agent_s12.py` — ejecución por API o `--stub` en proceso.
 - `tests/agent_helpers.py`, `tests/generation/agentic/{test_agent_tools,test_agent_loop,test_stub_flow}.py`,
   `tests/test_estimate_with_agent.py`, `tests/api/test_estimate_agent.py`.
-- `docs/sessions/12-agent.md`, `docs/sessions/12-agent-summary.md`, `S12_LOG.md` (temporal, borrable).
+- `docs/sessions/12-agent.md`, `docs/sessions/12-agent-summary.md`.
 
 **Modificados**
 - `app/config.py` (variables `AGENT_*`), `app/dependencies.py` (`get_async_openai_client`,
@@ -130,7 +130,9 @@ backend real con retriever falso (`RetrievalRequest` con `chunk_types=["historic
 
 ## 8. NO VERIFICADO
 
-- **Dos ejecuciones reales, ambas `max_steps_exceeded`** (`trace_complex.txt`, `trace_complex_02.txt`). El comportamiento con la convergencia forzada del bucle y el nuevo prompt **no está medido**: hay que repetir la ejecución real. Con tareas habrá bastantes búsquedas por componente: si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
+- **Tres ejecuciones reales.
+  - Las dos primeras (`trace_complex.txt`, `trace_complex_02.txt`) `max_steps_exceeded`** . El comportamiento con la convergencia forzada del bucle y el nuevo prompt **no está medido**: hay que repetir la ejecución real. Con tareas habrá bastantes búsquedas por componente: si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
+  - La tercera (`trace_complex_03_OK.txt`) finaliza pero no es del todo fiable.
 - **No contrastado con la API**: `tool_choice` como `allowed_tools` (`mode: "auto"`, lista de funciones por nombre) y como `"none"` en una petición con `previous_response_id`, `text.format` estricto y reasoning. Está en el SDK instalado (`ToolChoiceAllowedParam`) y en la guía oficial, pero no se ha ejecutado. Si la API lo rechazase (400), el síntoma sería un `502` en la vuelta 8.
 - Verificado contra la guía oficial *Function calling*: tools planas con `strict`, `function_call_output` con `call_id`, varias llamadas por respuesta, `previous_response_id` con `instructions` reenviadas, `["tipo","null"]` para opcionales.
 - **No contrastado con la API**: (a) combinar `tools` y `text.format` json_schema estricto en la misma petición con gpt-5/gpt-5-mini; (b) que acepte `type: ["object","null"]` con `properties` anidadas en `filters` (el patrón documentado es `["string","null"]`); (c) que `reasoning={"summary": "auto"}` esté disponible en tu organización (puede exigir verificación): si da 400, pasa `reasoning_summary=None` a `run_agent` y la traza usará `(no reasoning summary available)`; (d) que los `reasoning` items se mantengan entre vueltas solo con `previous_response_id` (es lo que documenta la guía).
