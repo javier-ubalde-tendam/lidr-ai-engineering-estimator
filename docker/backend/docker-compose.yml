@@ -9,7 +9,7 @@ services:
     image: lidr-estimator:local
     env_file:
       # Aquí llegan TODAS las variables de .env (RETRIEVAL_API_KEY, ESTIMATE_API_KEY, *_MODEL,
-      # RETRIEVAL_*, HALLUCINATION_*, ...). No se redeclaran en `environment:` porque la
+      # RETRIEVAL_*, HALLUCINATION_*, AGENT_*, ...). No se redeclaran en `environment:` porque la
       # interpolación ${VAR:-x} de Compose no lee este .env y pisaría los valores con el default
       - ../../.env
     environment:

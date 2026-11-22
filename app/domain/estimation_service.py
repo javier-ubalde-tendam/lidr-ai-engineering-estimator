@@ -8,6 +8,8 @@ Entry points (the routers in ``app/api`` only translate HTTP <-> these calls):
 - ``estimate_conversational()``  conversation (history + metadata + compression) -> prompt -> llm
                                  -> guardrails(out)
 - ``estimate_with_acb()``        agentic (Boss orchestrates Actor + Critic over the conversation)
+- ``estimate_with_agent()``      agentic (manual tool-calling loop; its ``search_budgets`` tool is
+                                 a closure over RAG retrieval, built HERE so agentic never imports rag)
 
 The blocking and the conversational paths do NOT read or write the caches on purpose: the
 conversational answer depends on session state the cache key does not capture.
@@ -17,12 +19,13 @@ When RAG joins the request path, its step is added here, never as a cross-import
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import instructor
 import structlog
 from instructor.core.exceptions import InstructorRetryException
 from litellm import APIError, AuthenticationError, RateLimitError, Timeout
+from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from app.config import Settings, get_settings
@@ -57,6 +60,9 @@ from app.foundation.prompts.loader import (
     render_estimation_prompt,
 )
 from app.generation.agentic import critic as critic_service
+from app.generation.agentic.agent_loop import run_agent
+from app.generation.agentic.agent_schemas import AgentResult, SearchBudgetsArgs
+from app.generation.agentic.agent_tools import SearchBackend, build_tool_registry
 from app.generation.agentic.boss import Boss
 from app.generation.cag.exact import ExactCache
 from app.generation.cag.semantic import SemanticCache
@@ -64,6 +70,8 @@ from app.generation.conversation.compression import apply_compression
 from app.generation.conversation.metadata_extractor import update_metadata
 from app.generation.conversation.models import Session
 from app.generation.conversation.tier_resolver import Tier, resolve_tier
+from app.generation.rag.schemas import RetrievalRequest, RetrievalResult
+from app.generation.rag.task_hours import HISTORICAL_TASK_CHUNK_TYPE
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +85,55 @@ _ESTIMATION_TOOL = instructor.openai_schema(EstimationResult).openai_schema
 
 class EstimationFailedError(Exception):
     """El LLM no devolvió una estimación válida (o el proveedor falló) tras los reintentos."""
+
+
+class AgentUnavailableError(Exception):
+    """The agent cannot run: it needs the OpenAI Responses API (OPENAI_API_KEY) and retrieval."""
+
+
+class BudgetRetriever(Protocol):
+    """What the agent's search tool needs from RAG (``TranscriptEstimator`` implements it)."""
+
+    async def retrieve_chunks(self, request: RetrievalRequest) -> RetrievalResult: ...
+
+
+def build_budget_search_backend(retriever: BudgetRetriever, settings: Settings) -> SearchBackend:
+    """``search_budgets`` backend: a thin closure over the existing RAG retrieval.
+
+    It only translates the tool arguments into a ``RetrievalRequest`` (always restricted to the
+    ``historical_task`` chunks, which carry engineer-hours) and the chunks into plain dicts.
+    Hybrid search and reranking are decided by ``retrieve_chunks`` from the runtime config.
+    """
+
+    async def search(args: SearchBudgetsArgs) -> list[dict[str, Any]]:
+        filters = args.filters
+        request = RetrievalRequest.model_validate(
+            {
+                "query_text": args.query,
+                "top_k": settings.AGENT_SEARCH_TOP_K,
+                "distance_threshold": settings.AGENT_SEARCH_DISTANCE_THRESHOLD,
+                "chunk_types": [HISTORICAL_TASK_CHUNK_TYPE],
+                "sectors": (filters.sectors or None) if filters else None,
+                "project_year_min": filters.project_year_min if filters else None,
+                "project_year_max": filters.project_year_max if filters else None,
+            }
+        )
+        result = await retriever.retrieve_chunks(request)
+        return [
+            {
+                "id": chunk.id,
+                "budget_id": chunk.budget_id,
+                "sector": chunk.sector,
+                "project_year": chunk.project_year,
+                # Chunk text = parent-budget header + task detail: the task part is what helps
+                "content_preview": chunk.content.split("\n\n", 1)[-1],
+                "estimated_hours": chunk.estimated_hours,
+                "distance": chunk.distance,
+            }
+            for chunk in result.chunks
+        ]
+
+    return search
 
 
 def _other_provider(provider: str) -> str:
@@ -127,9 +184,13 @@ class EstimationService:
         exact_cache: ExactCache | None = None,
         semantic_cache: SemanticCache | None = None,
         settings: Settings | None = None,
+        async_openai_client: AsyncOpenAI | None = None,
+        budget_retriever: BudgetRetriever | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.openai_client = openai_client
+        self.async_openai_client = async_openai_client
+        self.budget_retriever = budget_retriever
         self.llm_wrapper = llm_wrapper or LLMWrapper(self.settings)
         self.exact_cache = exact_cache or ExactCache()
         self.semantic_cache = semantic_cache or SemanticCache(openai_client)
@@ -408,6 +469,49 @@ class EstimationService:
             cached=False,
             acb=trace,
             **meta.model_dump(),
+        )
+
+    # ------------------------------------------------------------------
+    # Tool-calling agent (POST /v1/estimate/agent)
+    # ------------------------------------------------------------------
+
+    async def estimate_with_agent(
+        self,
+        transcript: str,
+        *,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+        max_iterations: int | None = None,
+    ) -> AgentResult:
+        """Run the manual agent loop; ``None`` overrides fall back to the AGENT_* settings.
+
+        Raises ``AgentUnavailableError`` without the async OpenAI client or the retriever, and
+        ``AgentLoopError`` (from the loop) when the OpenAI call fails.
+        """
+        if self.async_openai_client is None:
+            raise AgentUnavailableError("The agent requires OPENAI_API_KEY (OpenAI Responses API).")
+        if self.budget_retriever is None:
+            raise AgentUnavailableError("The agent requires the RAG retriever to search budgets.")
+
+        settings = self.settings
+        registry = build_tool_registry(build_budget_search_backend(self.budget_retriever, settings))
+        model = model or settings.AGENT_MODEL
+        effort = reasoning_effort or settings.AGENT_REASONING_EFFORT
+        iterations = max_iterations or settings.AGENT_MAX_ITERATIONS
+        logger.info(
+            "agent_started",
+            model=model,
+            reasoning_effort=effort,
+            max_iterations=iterations,
+            transcript_chars=len(transcript),
+        )
+        return await run_agent(
+            transcript,
+            client=self.async_openai_client,
+            registry=registry,
+            model=model,
+            effort=effort,
+            max_iterations=iterations,
         )
 
     # ------------------------------------------------------------------

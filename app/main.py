@@ -14,6 +14,7 @@ from app.api.ingestion import warm_up_catalog
 from app.api.rate_limiting import limiter, rate_limit_exceeded_handler
 from app.api.routers.corpus_index import router as corpus_index_router
 from app.api.routers.estimate import router as estimate_router
+from app.api.routers.estimate_agent import router as estimate_agent_router
 from app.api.routers.estimate_stages import router as estimate_stages_router
 from app.api.routers.estimate_tasks import router as estimate_tasks_router
 from app.api.routers.retrieval import router as retrieval_router
@@ -86,6 +87,8 @@ app.include_router(retrieval_router)
 app.include_router(retrieval_advanced_router)
 # Session 9: transcript -> grounded estimate (POST /v1/estimate/from-transcript)
 app.include_router(estimate_router)
+# Session 12: tool-calling agent with a manual loop (POST /v1/estimate/agent)
+app.include_router(estimate_agent_router)
 # Didactic extras (8c): the pipeline one stage at a time, per-task hours, incremental corpus growth
 app.include_router(estimate_stages_router)
 app.include_router(estimate_tasks_router)

@@ -14,7 +14,8 @@ crea otra carpeta suelta en la raíz. Las reglas de dependencias las **vigila un
   transcripciones y documentación técnica → chunks + embeddings en PostgreSQL/pgvector → recuperación
   (vectorial, híbrida, multi-índice, reranking) → estimación citable.
 - **Agéntica** (`app/generation/agentic/`). Bucle Actor-Crítico-Boss que audita la estimación apoyado
-  en la conversación multi-turno (`app/generation/conversation/`).
+  en la conversación multi-turno (`app/generation/conversation/`), y (Sesión 12) un **agente con tools**
+  y bucle manual sobre la Responses API (`agent_loop.py`, `agent_tools.py`, `agent_schemas.py`).
 
 **Tesis central**: estas tres capas no se conocen entre sí. **Componen únicamente a través del
 conductor** (`app/domain/estimation_service.py`).
@@ -42,7 +43,7 @@ app/
 ├── generation/
 │   ├── cag/                #   exact.py + semantic.py
 │   ├── rag/                #   chunking/ embedding/ analysis/ store/ retrieval/ quality/ + estimator, validation, ...
-│   ├── agentic/            #   boss.py + critic.py
+│   ├── agentic/            #   boss.py + critic.py (ACB) · agent_loop.py + agent_tools.py + agent_schemas.py (agente S12)
 │   └── conversation/       #   models, store, metadata_extractor, tier_resolver, compression/
 │
 ├── ingestion/              # pipeline batch offline (catálogo, parsers, limpieza, PII)
@@ -50,7 +51,7 @@ app/
 └── api/                    # transporte: routers finos, sin lógica de negocio
     ├── estimations.py, sessions.py, embeddings.py, search.py, ingestion.py, config.py
     ├── security.py, rate_limiting.py, errors.py, request_context.py
-    └── routers/            #   retrieval, retrieval_advanced, estimate, estimate_stages, estimate_tasks, corpus_index
+    └── routers/            #   retrieval, retrieval_advanced, estimate, estimate_stages, estimate_tasks, estimate_agent, corpus_index
 ```
 
 ## 3. Reglas de dependencias (MUST / MUST NOT)
@@ -80,12 +81,30 @@ de `generation.conversation.models` (tipos de valor), igual que en la solución 
 
 ## 4. El conductor
 
-`EstimationService` tiene cuatro entradas:
+`EstimationService` tiene cinco entradas:
 
 - `estimate()` — guardrails(in) → prompt → llm → guardrails(out). Sin cachés (como antes).
 - `estimate_stream()` — guardrails(in) → cag exacto → cag semántico → prompt → llm (stream) → guardrails(out) → cag.store.
 - `estimate_conversational()` — conversation (historial + metadata + compresión) → prompt → llm → guardrails(out).
 - `estimate_with_acb()` — agentic (Boss orquesta Actor + Critic sobre la conversación).
+- `estimate_with_agent()` — agentic (agente con tools, Sesión 12). El conductor construye el backend de
+  `search_budgets` como un closure sobre `TranscriptEstimator.retrieve_chunks` (`build_budget_search_backend`)
+  y lo **inyecta** en el registro de tools; `dependencies.get_agent_estimation_service` le entrega el cliente
+  `AsyncOpenAI` y el `TranscriptEstimator`.
+
+### El agente de la Sesión 12 (`generation/agentic/`)
+
+- `agent_schemas.py` (argumentos de las tools, `AgentEstimate`, traza), `agent_tools.py` (schemas planos
+  `strict` que lee el modelo, `calculate_estimate` y `validate_estimate` deterministas, `search_budgets` con
+  backend inyectado, `execute_tool`), `agent_loop.py` (`run_agent`, `SYSTEM_PROMPT`, `format_trace`).
+- **Regla: las tools reciben sus backends inyectados desde el conductor.** El agente no importa
+  `generation/rag`, `dependencies` ni `api`; la recuperación (híbrida + reranking según la runtime config) es la
+  que ya existe, no se reimplementa. En tests y en `scripts/run_agent_s12.py --stub` el backend es un fake.
+- **Excepción deliberada a "todo pasa por `LLMWrapper`"**: el bucle usa la Responses API cruda
+  (`AsyncOpenAI.responses.create`) sin frameworks ni `tool_runner`, para poder ver y capturar cada paso. Por eso
+  `get_async_openai_client()` es un cliente aparte (`None` sin `OPENAI_API_KEY`) y `get_openai_client` no cambia.
+- Endpoint: `POST /v1/estimate/agent` (`api/routers/estimate_agent.py`, fino: auth, 5/min, validación de
+  overrides, 503/502). Detalle en [docs/sessions/12-agent.md](docs/sessions/12-agent.md).
 
 Los endpoints RAG de las sesiones 9-11 (`/v1/estimate/from-transcript`, `/v1/estimate/stages/*`,
 `/v1/estimate/tasks/hours`, `/v1/retrieval/*`) no mezclan hermanos de `generation` (solo RAG): los

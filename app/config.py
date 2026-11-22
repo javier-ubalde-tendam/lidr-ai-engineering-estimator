@@ -104,6 +104,17 @@ class Settings(BaseSettings):
     RETRIEVAL_API_KEY: str | None = None
     ESTIMATE_API_KEY: str | None = None
 
+    # Session 12 - estimation agent (POST /v1/estimate/agent). DELIBERATE EXCEPTION to "every LLM
+    # call goes through LLMWrapper": the agent talks to the raw OpenAI Responses API (AsyncOpenAI)
+    # so the hand-written loop is visible and every step can be captured in the trace.
+    AGENT_MODEL: str = "gpt-5"
+    AGENT_REASONING_EFFORT: Literal["minimal", "low", "medium", "high"] = "medium"
+    # Upper bound of model turns per run (each turn may run several tool calls in parallel)
+    AGENT_MAX_ITERATIONS: int = Field(default=10, ge=1)
+    # Historical tasks returned per search_budgets call and the cosine-distance cut-off
+    AGENT_SEARCH_TOP_K: int = Field(default=5, ge=1, le=30)
+    AGENT_SEARCH_DISTANCE_THRESHOLD: float = Field(default=0.6, ge=0, le=2)
+
     # Session 10 live - advanced multi-index retrieval; each stage is independently switchable
     RETRIEVAL_ROUTING_ENABLED: bool = True
     QUERY_TRANSFORM_ENABLED: bool = True

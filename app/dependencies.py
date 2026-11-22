@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import anthropic
 import tiktoken
 from fastapi import Depends
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
@@ -57,6 +57,14 @@ def get_openai_client() -> OpenAI:
     # lru_cache sin argumentos = singleton perezoso: se construye una sola vez, en el primer uso
     settings = get_settings()
     return OpenAI(api_key=settings.OPENAI_API_KEY)
+
+
+@lru_cache
+def get_async_openai_client() -> AsyncOpenAI | None:
+    # Session 12 agent: it talks to the raw OpenAI Responses API (deliberately not LLMWrapper), so
+    # it needs OpenAI specifically. None (no key) lets the endpoint answer 503 instead of failing
+    api_key = get_settings().OPENAI_API_KEY
+    return AsyncOpenAI(api_key=api_key) if api_key else None
 
 
 @lru_cache
@@ -318,4 +326,23 @@ def get_estimation_service(
         exact_cache=get_cache(),
         semantic_cache=semantic_cache,
         settings=get_settings(),
+    )
+
+
+def get_agent_estimation_service(
+    openai_client: OpenAI = Depends(get_openai_client),
+    semantic_cache: SemanticCache = Depends(get_semantic_cache),
+    async_client: AsyncOpenAI | None = Depends(get_async_openai_client),
+    estimator: TranscriptEstimator = Depends(get_transcript_estimator),
+) -> EstimationService:
+    # The conductor gets the two collaborators of the agent: the async client of the loop and the
+    # RAG retriever its search_budgets tool wraps (agentic itself never imports rag)
+    return EstimationService(
+        openai_client=openai_client,
+        llm_wrapper=get_llm_wrapper(),
+        exact_cache=get_cache(),
+        semantic_cache=semantic_cache,
+        settings=get_settings(),
+        async_openai_client=async_client,
+        budget_retriever=estimator,
     )
