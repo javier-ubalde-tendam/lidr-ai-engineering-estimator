@@ -44,7 +44,8 @@ Ninguna fase BLOCKED.
 - **Petición**: `{transcript (100-50000 car.), model?, reasoning_effort? (minimal|low|medium|high), max_iterations? (1-20)}`.
   `model` debe ser un `gpt-5*` de `AVAILABLE_MODELS` (422 si no).
 - **Respuesta 200**: `{status: "done"|"max_steps_exceeded"|"error", estimate|null, trace[], usage, iterations, error|null}`
-  (superconjunto de `{status, estimate, trace, usage}`). Cada paso de `trace`: `step`, `reasoning`, `actions[]`
+  (superconjunto de `{status, estimate, trace, usage}`; desde §11 también `coverage`, `unbudgeted_tasks`,
+  `total_is_lower_bound` y `warnings`, solo añadidos). Cada paso de `trace`: `step`, `reasoning`, `actions[]`
   (`tool`, `call_id`, `arguments`, `observation`, `duration_ms`, `error`), `usage`, `duration_ms`, `validation_error`.
 - **Errores**: 503 sin `OPENAI_API_KEY`; 502 si falla la API de OpenAI (mensaje genérico); 422 validación.
 - Ningún endpoint existente cambia.
@@ -54,10 +55,10 @@ Ninguna fase BLOCKED.
 **`search_budgets(query, filters)`** — filtros `sectors`, `project_year_min`, `project_year_max` (todos aplicados):
 > Search the historical database for past engineering TASKS similar to ONE task of the project and return the engineer-hours each one actually took. The items are functional tasks (a feature or a piece of a module, roughly 16 to 72 hours each): not whole systems, and not small chores or product-specific details. Break a component down to that level before searching. Make one call per task, each with its own query; do not mix unrelated tasks in a single search. Independent searches, including the rephrasings of a round, can be issued together in the same turn. Returns `items` (id, budget_id, sector, project_year, content_preview, estimated_hours = engineer-hours, distance = cosine distance: lower is more similar), `count`, a `summary`, the `filters_applied` and `low_confidence`. When `low_confidence` is true or `count` is 0 the evidence is weak: rephrase with more generic wording (what the task does, without product or protocol names) or drop the filters. If two rephrasings are still weak, the history has no equivalent for that task: report it as unbudgeted instead of searching further. The `estimated_hours` of the relevant items are the `reference_amounts` of that task in `calculate_estimate`.
 
-**`calculate_estimate(components[{name, tasks[{name, reference_amounts}]}])`**
+**`calculate_estimate(components[{name, tasks[{name, references[{budget_id, estimated_hours}]}]}])`** (descripción vigente tras §11; ver `agent_tools.py`)
 > Deterministic cost model (no LLM) that turns historical hours into an estimate. Pass the project components, each with its `tasks`; every task has a `name` and `reference_amounts`: the `estimated_hours` of the relevant items that `search_budgets` returned for that task (an empty list when nothing relevant was found). A task costs the median of its references plus a fixed 15% contingency; a component is the SUM of its tasks; the project total is the sum of the components. Returns per component its `estimated_hours` and the per-task breakdown, plus `total_hours` and a `summary`. A task without references costs 0 h and is listed in `unbudgeted_tasks` (hours are never guessed): search again for it, or report it as unbudgeted. Its output is the basis of the final answer.
 
-**`validate_estimate(components[{name, tasks[{name, estimated_hours, reference_amounts}]}], total_hours)`**
+**`validate_estimate(components[{name, tasks[{name, estimated_hours, references[{budget_id, estimated_hours}]}]}], total_hours)`** (descripción vigente tras §11)
 > Sanity-check a draft estimate before answering. Pass every component with its tasks (each with `name`, `estimated_hours` as returned by `calculate_estimate`, and `reference_amounts`), plus the `total_hours` you intend to report. Returns `ok`, a list of `issues` (task without references, task hours far outside the range of its references, total that does not match the sum of the tasks, non-positive or disproportionate total) and a `summary`. When `ok` is false, fix the cause (search again or recompute) and validate again.
 
 Por qué así: es lo único que lee el modelo, así que cada descripción dice qué hace, cuándo usarla (una búsqueda por
@@ -130,9 +131,13 @@ backend real con retriever falso (`RetrievalRequest` con `chunk_types=["historic
 
 ## 8. NO VERIFICADO
 
-- **Tres ejecuciones reales**
-  - Las dos primeras (`trace_complex.txt`, `trace_complex_02.txt`) `max_steps_exceeded`. El comportamiento con la convergencia forzada del bucle y el nuevo prompt **no está medido**: hay que repetir la ejecución real. Con tareas habrá bastantes búsquedas por componente: si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
-  - La tercera (`trace_complex_03_OK.txt`) finaliza pero no es del todo fiable.
+- **Ejecuciones reales** (ver §11 y §12)
+  - Las dos primeras (`trace_complex_01_FAIL.txt`, `trace_complex_02_FAIL.txt`) acabaron en `max_steps_exceeded`.
+  - La tercera (`trace_complex_03_OK.txt`) finalizó (`status: done`, 9 vueltas) con las limitaciones de §11.
+  - La cuarta (`trace_complex_04.txt`, con el endurecimiento de §11) finalizó en 10 vueltas con cobertura, cota
+    inferior y referencias por id; queda el fallo de validación parcial de §12.
+  - Siguen sin contrastarse con la API real los puntos de más abajo (`tool_choice`, `text.format`, etc.) más allá de
+    que estas ejecuciones funcionaron. Si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
 - **No contrastado con la API**: `tool_choice` como `allowed_tools` (`mode: "auto"`, lista de funciones por nombre) y como `"none"` en una petición con `previous_response_id`, `text.format` estricto y reasoning. Está en el SDK instalado (`ToolChoiceAllowedParam`) y en la guía oficial, pero no se ha ejecutado. Si la API lo rechazase (400), el síntoma sería un `502` en la vuelta 8.
 - Verificado contra la guía oficial *Function calling*: tools planas con `strict`, `function_call_output` con `call_id`, varias llamadas por respuesta, `previous_response_id` con `instructions` reenviadas, `["tipo","null"]` para opcionales.
 - **No contrastado con la API**: (a) combinar `tools` y `text.format` json_schema estricto en la misma petición con gpt-5/gpt-5-mini; (b) que acepte `type: ["object","null"]` con `properties` anidadas en `filters` (el patrón documentado es `["string","null"]`); (c) que `reasoning={"summary": "auto"}` esté disponible en tu organización (puede exigir verificación): si da 400, pasa `reasoning_summary=None` a `run_agent` y la traza usará `(no reasoning summary available)`; (d) que los `reasoning` items se mantengan entre vueltas solo con `previous_response_id` (es lo que documenta la guía).
@@ -164,8 +169,9 @@ uv run python scripts/run_agent_s12.py exercises/session-12/sample_transcript_si
 uv run python scripts/run_agent_s12.py exercises/session-12/sample_transcript_complex.txt --model gpt-5 --effort medium --out exercises/session-12/trace_complex.txt
 ```
 
-Criterio de aceptación a mirar en la traza: más de una búsqueda (una por componente), alguna reformulación si hay
-`low_confidence`, `calculate_estimate` y `validate_estimate` usadas, `status: done`.
+Criterio de aceptación a mirar en la traza (la ejecución vigente es `trace_complex_04.txt`; renombrarla a `trace_complex.txt` al cerrar): más de una búsqueda, alguna reformulación si hay `low_confidence`,
+`calculate_estimate` llamada **después** de la última búsqueda, `validate_estimate` usada, `status: done`, cobertura
+visible en `RESULT` y `budget_id` citados que aparecen en los `closest:` de las búsquedas.
 
 ## 10. Cómo ver trazas del servicio en funcionamiento
 
@@ -179,3 +185,64 @@ docker compose logs -f ai_service | Select-String "agent_"
 # Empezar desde las últimas líneas, sin el histórico
 docker compose logs -f --tail 0 ai_service
 ```
+
+## 11. Ejecución real `trace_complex_03_OK.txt` y endurecimiento posterior
+
+**La ejecución buena.** `exercises/session-12/trace_complex_03_OK.txt` (gpt-5 medium, transcripción compleja):
+`status: done` en 9 vueltas, 384,6 h, ~215 k tokens. Es la primera ejecución real que llega a una estimación, gracias a
+la descomposición en tareas, las vueltas finales reservadas y `tool_choice`. Sus **limitaciones** (confirmadas en la
+traza y en el código) motivaron los cambios de abajo:
+1. **Cálculo desfasado**: en el STEP 6 se calcula con 10 de 21 tareas sin referencias; en el STEP 7 una búsqueda más
+   devuelve 5 ítems utilizables; en los STEPS 8-9 se valida y se responde con el cálculo antiguo.
+2. **Referencias reconstruidas de memoria**: `calculate_estimate` solo recibía horas, así que el modelo reconstruía
+   los `reference_budget_ids` al final (lo dice en su razonamiento), con ids mezclados entre componentes.
+3. **Validador contradictorio**: `no_reference` era `issue` (`ok=false`) y el prompt mandaba «resolver los issues»
+   cuando ya no se podía buscar.
+4. **Cobertura invisible**: 10 de 21 tareas valen 0 h (el corpus no contiene tarifas, offline, firma/foto, SAP/ERP,
+   maestros ni facturas), pero el total solo lo advertía el texto libre de `notes`.
+5. **Traza recortada**: `ARGUMENT_PREVIEW_MAX_CHARS = 300` truncaba los `action:` de `calculate_estimate` y
+   `validate_estimate`.
+
+**Cambios** (detalle y motivos en [12-agent.md](12-agent.md), «Endurecimiento…»):
+- **Invariante de frescura en el bucle** (no en la tool pura): respuesta tras una búsqueda posterior al último
+  cálculo → turno correctivo; `validate_estimate` con cálculo desfasado → aviso `stale_calculation`; total distinto del
+  último cálculo → corrección; caso límite del último turno (`tool_choice="none"`) → se acepta con aviso.
+- **Referencias `{budget_id, estimated_hours}`** (segundo cambio de contrato respecto al kit; el primero fue el nivel
+  `tasks`), ids devueltos por tarea y componente, y validación en el bucle de los ids del JSON final.
+- **Cobertura calculada por el sistema** (`coverage`, `unbudgeted_tasks`, `total_is_lower_bound`) en `AgentResult`,
+  en la respuesta del endpoint (solo añadidos) y en `RESULT`.
+- **Validador con `warnings`**: `no_reference` ya no rompe `ok`; `summary` con recuentos y códigos; descripción de
+  la tool y paso 5 del prompt cambiados a la vez.
+- **Prompt**: calcular al terminar la ronda de búsquedas, recalcular si se busca después, una ronda agrupada de
+  reformulaciones; sin números fijos.
+- **Traza**: `action:` de calculate/validate completos; recortes ≥ 600 caracteres con `…[truncated]`; los 3 ítems
+  más cercanos de cada búsqueda con `budget_id` y horas.
+- **No cambia**: `AGENT_SEARCH_DISTANCE_THRESHOLD` (0,6) ni `WEAK_MATCH_DISTANCE` (0,45); subirlos añadiría análogos
+  irrelevantes (el corpus no cubre esos temas) y haría la estimación parecer más completa de lo que es.
+- Nivel de tareas («3 a 6 por componente», 16-72 h): conservado, parte del diseño.
+
+**Medido**: la ejecución `trace_complex_04.txt` (§12) confirma los cambios en una ejecución real. Los tests siguen
+usando solo fakes.
+
+## 12. Evolución del agente y estado actual
+
+### Evolución del agente (una frase por traza)
+
+1. `trace_complex_01_FAIL`: el agente solo buscó (13 búsquedas largas, con consultas a nivel de componente) y agotó las 10 iteraciones sin llegar a calcular ni responder (`max_steps_exceeded`, ~80k tokens).
+2. `trace_complex_02_FAIL`: se añadió más paralelismo (33 búsquedas), pero el agente siguió reformulando consultas con jerga muy específica (IDoc, DEBMAS/MATMAS, RabbitMQ) que el corpus no tiene, y volvió a agotar las 10 iteraciones sin respuesta (~163k tokens).
+3. `trace_complex_03_OK`: con el cierre forzado y las consultas más funcionales, el agente por fin convergió y devolvió un estimado, pero era una cota inferior sin avisar, con referencias reconstruidas de memoria, una validación contradictoria y un cálculo desactualizado respecto a las últimas búsquedas.
+4. `trace_complex_04`: tras el refuerzo, el agente recalcula después de buscar, usa referencias por id válidas, el sistema informa de cobertura (15 de 20), cota inferior y tareas sin presupuestar, y el validador distingue avisos de errores. Queda un fallo: validó con solo 2 de 4 componentes, y la validación final con `total_mismatch` se ignoró.
+
+### Estado actual y limitación conocida (`trace_complex_04.txt`)
+
+La última ejecución real (gpt-5 medium, transcripción compleja) termina con `status: done` en 10 vueltas, ~318 k
+tokens y 563,7 h. `RESULT` muestra la cobertura (**15 de 20 tareas con referencias, 75 %**), `total is a lower bound:
+yes` y las 5 tareas sin presupuesto; la primera validación da «0 issues, 5 warnings: no_reference×5» (ya no hay falsos
+errores) y los `budget_id` citados son ids reales devueltos por las búsquedas.
+
+**Fallo pendiente (no corregido):** el agente validó con solo **2 de los 4 componentes**, y la validación final
+devolvió `total_mismatch` (1 issue, 3 warnings), que ignoró. El total entregado sí coincide con la suma de los cuatro
+componentes del último cálculo, así que el número no está mal; lo que falla es que la validación no cubrió el borrador
+completo y el bucle no lo detecta. Posibles refuerzos (no implementados): que el bucle compare los componentes de
+`validate_estimate` con los del último `calculate_estimate` y avise (`partial_validation`), o que trate un `issue`
+sin resolver en la última validación como aviso en `AgentResult.warnings`.

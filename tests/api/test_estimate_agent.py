@@ -14,6 +14,8 @@ from app.generation.agentic.agent_schemas import (
     AgentEstimate,
     AgentResult,
     AgentStep,
+    AgentWarning,
+    Coverage,
     TokenUsage,
 )
 from app.main import app
@@ -86,12 +88,43 @@ def test_a_finished_run_returns_the_estimate_the_trace_and_the_usage(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "done" and body["estimate"]["total_hours"] == 120.0
+    assert body["status"] == "done" and body["estimate"]["total_hours"] == 115.0
     assert body["trace"][0]["actions"][0]["tool"] == "search_budgets"
     assert body["usage"]["total_tokens"] == 2
     assert service.calls == [
         (BODY["transcript"], {"model": None, "reasoning_effort": None, "max_iterations": None})
     ]
+
+
+def test_the_new_fields_are_added_and_the_existing_ones_do_not_change(
+    client: TestClient, service: FakeAgentService
+) -> None:
+    service.result = done_result().model_copy(
+        update={
+            "coverage": Coverage(budgeted_tasks=11, total_tasks=21, ratio=0.524),
+            "unbudgeted_tasks": ["Backend / Tariffs"],
+            "total_is_lower_bound": True,
+            "warnings": [AgentWarning(code="stale_calculation", message="m")],
+        }
+    )
+
+    body = client.post(URL, json=BODY).json()
+
+    assert body["coverage"] == {"budgeted_tasks": 11, "total_tasks": 21, "ratio": 0.524}
+    assert body["unbudgeted_tasks"] == ["Backend / Tariffs"]
+    assert body["total_is_lower_bound"] is True
+    assert body["warnings"] == [{"code": "stale_calculation", "message": "m"}]
+    # The pre-existing contract is untouched (only additions)
+    assert {"status", "estimate", "trace", "iterations", "usage", "error"} <= set(body)
+    assert set(body["estimate"]) == {"components", "total_hours", "notes"}
+    assert set(body["trace"][0]) >= {"step", "reasoning", "actions", "usage", "duration_ms"}
+
+
+def test_a_run_without_calculation_has_empty_coverage_fields(client: TestClient) -> None:
+    body = client.post(URL, json=BODY).json()
+
+    assert body["coverage"] is None and body["unbudgeted_tasks"] == []
+    assert body["total_is_lower_bound"] is False and body["warnings"] == []
 
 
 def test_the_overrides_are_forwarded_to_the_conductor(

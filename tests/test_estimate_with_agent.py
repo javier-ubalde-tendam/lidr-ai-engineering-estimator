@@ -17,9 +17,11 @@ from app.generation.agentic.agent_tools import build_tool_registry, execute_tool
 from app.generation.rag.schemas import RetrievalRequest, RetrievalResult, RetrievedChunk
 from tests.agent_helpers import (
     FakeAsyncOpenAI,
+    calc_args,
     final_response,
     function_call,
     make_response,
+    reference,
     valid_estimate,
 )
 
@@ -149,7 +151,22 @@ async def test_estimate_with_agent_runs_the_loop_with_the_real_backend_and_setti
                 "resp_1",
                 [function_call("search_budgets", {"query": "payment gateway integration"}, "c1")],
             ),
-            final_response("resp_2", valid_estimate()),
+            make_response(
+                "resp_2",
+                [
+                    function_call(
+                        "calculate_estimate",
+                        calc_args(
+                            {
+                                "name": "Gateway",
+                                "references": [reference("TASK-2023-0007", 80.0)],
+                            }
+                        ),
+                        "c2",
+                    )
+                ],
+            ),
+            final_response("resp_3", valid_estimate(92.0, ids=("TASK-2023-0007",))),
         ]
     )
     service = make_service(async_openai_client=client, budget_retriever=retriever)

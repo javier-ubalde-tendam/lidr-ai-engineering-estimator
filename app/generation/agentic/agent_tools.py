@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from app.generation.agentic.agent_schemas import (
     TOTAL_TOLERANCE_HOURS,
     CalculateEstimateArgs,
+    Coverage,
     SearchBudgetsArgs,
     ValidateEstimateArgs,
 )
@@ -64,29 +65,36 @@ SEARCH_BUDGETS_DESCRIPTION = (
     "the evidence is weak: rephrase with more generic wording (what the task does, without "
     "product or protocol names) or drop the filters. If two rephrasings are still weak, the "
     "history has no equivalent for that task: report it as unbudgeted instead of searching "
-    "further. The `estimated_hours` of the relevant items are the `reference_amounts` of that "
-    "task in `calculate_estimate`."
+    "further. For each relevant item, its `budget_id` and `estimated_hours` form one reference "
+    "of that task in `calculate_estimate`; only budget_ids returned here may be cited later."
 )
 
 CALCULATE_ESTIMATE_DESCRIPTION = (
     "Deterministic cost model (no LLM) that turns historical hours into an estimate. Pass the "
-    "project components, each with its `tasks`; every task has a `name` and `reference_amounts`: "
-    "the `estimated_hours` of the relevant items that `search_budgets` returned for that task "
-    "(an empty list when nothing relevant was found). A task costs the median of its references "
-    "plus a fixed 15% contingency; a component is the SUM of its tasks; the project total is the "
-    "sum of the components. Returns per component its `estimated_hours` and the per-task "
-    "breakdown, plus `total_hours` and a `summary`. A task without references costs 0 h and is "
-    "listed in `unbudgeted_tasks` (hours are never guessed): search again for it, or report it "
-    "as unbudgeted. Its output is the basis of the final answer."
+    "project components, each with its `tasks`; every task has a `name` and its `references`: "
+    "one `{budget_id, estimated_hours}` object per relevant item that `search_budgets` returned "
+    "for that task (an empty list when nothing relevant was found). A task costs the median of "
+    "the `estimated_hours` of its references plus a fixed 15% contingency; a component is the "
+    "SUM of its tasks; the project total is the sum of the components. Returns per task and per "
+    "component its `estimated_hours` and the `reference_budget_ids` it rests on (the ids to cite "
+    "in the final answer), plus `total_hours`, the `unbudgeted_tasks` and a `summary`. A task "
+    "without references costs 0 h (hours are never guessed): search again for it, or report it "
+    "as unbudgeted. It is a pure function: it does not know what you searched. Run it after "
+    "your last search; if you search again afterwards, run it again. Its output is the basis "
+    "of the final answer."
 )
 
 VALIDATE_ESTIMATE_DESCRIPTION = (
     "Sanity-check a draft estimate before answering. Pass every component with its tasks (each "
-    "with `name`, `estimated_hours` as returned by `calculate_estimate`, and `reference_amounts`), "
-    "plus the `total_hours` you intend to report. Returns `ok`, a list of `issues` (task without "
-    "references, task hours far outside the range of its references, total that does not match "
-    "the sum of the tasks, non-positive or disproportionate total) and a `summary`. When `ok` "
-    "is false, fix the cause (search again or recompute) and validate again."
+    "with `name`, `estimated_hours` as returned by `calculate_estimate`, and its `references` as "
+    "`{budget_id, estimated_hours}` objects), plus the `total_hours` you intend to report. "
+    "Returns `ok`, `issues`, `warnings` and a `summary` with the counts and codes. `issues` are "
+    "real defects (hours far outside the range of the task's references, non-positive hours, a "
+    "total that does not match the sum of the tasks, a non-positive or disproportionate total): "
+    "fix their cause and validate again. `warnings` are informative: a task with no reference "
+    "(already declared as unbudgeted) is acceptable, no need to search again; report it in "
+    "`notes`. A `stale_calculation` warning means you searched after your last calculation: "
+    "recalculate."
 )
 
 
@@ -101,10 +109,24 @@ def _function_tool(name: str, description: str, parameters: dict[str, Any]) -> d
     }
 
 
-_REFERENCE_AMOUNTS = {
+_REFERENCES = {
     "type": "array",
-    "items": {"type": "number"},
-    "description": "Engineer-hours of the relevant historical items found for this task.",
+    "description": "The relevant historical items found for this task, one object per item.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "budget_id": {
+                "type": "string",
+                "description": "budget_id of the item, exactly as `search_budgets` returned it.",
+            },
+            "estimated_hours": {
+                "type": "number",
+                "description": "Engineer-hours of that item, as `search_budgets` returned them.",
+            },
+        },
+        "required": ["budget_id", "estimated_hours"],
+        "additionalProperties": False,
+    },
 }
 
 SEARCH_BUDGETS_SCHEMA = _function_tool(
@@ -173,9 +195,9 @@ CALCULATE_ESTIMATE_SCHEMA = _function_tool(
                                 "type": "object",
                                 "properties": {
                                     "name": {"type": "string", "description": "Task name."},
-                                    "reference_amounts": _REFERENCE_AMOUNTS,
+                                    "references": _REFERENCES,
                                 },
-                                "required": ["name", "reference_amounts"],
+                                "required": ["name", "references"],
                                 "additionalProperties": False,
                             },
                         },
@@ -214,9 +236,9 @@ VALIDATE_ESTIMATE_SCHEMA = _function_tool(
                                         "type": "number",
                                         "description": "Hours estimated for the task.",
                                     },
-                                    "reference_amounts": _REFERENCE_AMOUNTS,
+                                    "references": _REFERENCES,
                                 },
-                                "required": ["name", "estimated_hours", "reference_amounts"],
+                                "required": ["name", "estimated_hours", "references"],
                                 "additionalProperties": False,
                             },
                         },
@@ -322,6 +344,11 @@ def make_search_budgets(backend: SearchBackend) -> ToolFunction:
     return search_budgets
 
 
+def _unique(ids: list[str]) -> list[str]:
+    """Drop duplicates keeping the first-seen order (stable, deterministic output)."""
+    return list(dict.fromkeys(ids))
+
+
 async def calculate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
     """Cost each component as the SUM of its tasks, each task from its historical hours (no LLM).
 
@@ -332,6 +359,10 @@ async def calculate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
     of its tasks and the project total the sum of the components. A task without references
     costs 0 h and is listed in ``unbudgeted_tasks``: inventing a number would defeat the point
     of grounding the estimate on history.
+
+    References carry their ``budget_id``: the result returns the ids per task and per component
+    (no duplicates, first-seen order) so the final answer can cite them without reconstructing
+    them from memory. The function is pure: it cannot know whether the model searched afterwards.
     """
     args = CalculateEstimateArgs.model_validate(raw_args)
     components: list[dict[str, Any]] = []
@@ -339,24 +370,30 @@ async def calculate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
     for component in args.components:
         tasks: list[dict[str, Any]] = []
         for task in component.tasks:
-            refs = task.reference_amounts
-            central = statistics.median(refs) if refs else 0.0
+            hours = [reference.estimated_hours for reference in task.references]
+            central = statistics.median(hours) if hours else 0.0
             tasks.append(
                 {
                     "name": task.name,
-                    "reference_count": len(refs),
+                    "reference_count": len(hours),
+                    "reference_budget_ids": _unique(
+                        [reference.budget_id for reference in task.references]
+                    ),
                     "central_hours": round(central, 1),
                     "estimated_hours": round(central * (1 + CONTINGENCY_FACTOR), 1),
-                    "unbudgeted": not refs,
+                    "unbudgeted": not hours,
                 }
             )
-            if not refs:
+            if not hours:
                 unbudgeted.append(f"{component.name} / {task.name}")
         components.append(
             {
                 "name": component.name,
                 # Summing the rounded task values keeps every level consistent with what is shown
                 "estimated_hours": round(sum(task["estimated_hours"] for task in tasks), 1),
+                "reference_budget_ids": _unique(
+                    [budget_id for task in tasks for budget_id in task["reference_budget_ids"]]
+                ),
                 "unbudgeted_tasks": [task["name"] for task in tasks if task["unbudgeted"]],
                 "tasks": tasks,
             }
@@ -374,35 +411,74 @@ async def calculate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
         "components": components,
         "total_hours": total,
         "contingency_factor": CONTINGENCY_FACTOR,
+        "unbudgeted_tasks": unbudgeted,
         "summary": summary,
     }
 
 
-def _issue(where: str | None, code: str, message: str) -> dict[str, Any]:
+def coverage_of(calculation: dict[str, Any]) -> tuple[Coverage, list[str]]:
+    """Coverage and unbudgeted task names of a ``calculate_estimate`` result (system-computed)."""
+    tasks = [
+        (component["name"], task)
+        for component in calculation.get("components", [])
+        for task in component.get("tasks", [])
+    ]
+    unbudgeted = [f"{name} / {task['name']}" for name, task in tasks if task.get("unbudgeted")]
+    total = len(tasks)
+    budgeted = total - len(unbudgeted)
+    ratio = round(budgeted / total, 3) if total else 0.0
+    return Coverage(budgeted_tasks=budgeted, total_tasks=total, ratio=ratio), unbudgeted
+
+
+def _finding(where: str | None, code: str, message: str) -> dict[str, Any]:
     return {"where": where, "code": code, "message": message}
 
 
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def summarize_findings(issues: list[dict[str, Any]], warnings: list[dict[str, Any]]) -> str:
+    """``"0 issues, 10 warnings: no_reference×10"``: counts first, then every code with its count."""
+    if not issues and not warnings:
+        return "Estimate looks consistent."
+    counts: dict[str, int] = {}
+    for finding in [*issues, *warnings]:
+        counts[finding["code"]] = counts.get(finding["code"], 0) + 1
+    codes = ", ".join(f"{code}×{count}" for code, count in counts.items())
+    return f"{_plural(len(issues), 'issue')}, {_plural(len(warnings), 'warning')}: {codes}"
+
+
 async def validate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
-    """Deterministic sanity checks over a draft estimate; never raises on bad numbers."""
+    """Deterministic sanity checks over a draft estimate; never raises on bad numbers.
+
+    Two severities: ``issues`` are defects the model must fix (``ok`` is false); ``warnings``
+    are informative and do not break ``ok``. A task without references is a warning: after the
+    searches are over it is an already-declared gap (it costs 0 h), not something to fix.
+    """
     args = ValidateEstimateArgs.model_validate(raw_args)
     issues: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     tasks_sum = 0.0
 
     for component in args.components:
         for task in component.tasks:
             where = f"{component.name} / {task.name}"
-            refs, hours = task.reference_amounts, task.estimated_hours
+            refs = [reference.estimated_hours for reference in task.references]
+            hours = task.estimated_hours
             tasks_sum += hours
             if not refs:
-                issues.append(_issue(where, "no_reference", "No historical reference: search again."))
+                warnings.append(
+                    _finding(where, "no_reference", "No historical reference: unbudgeted task.")
+                )
                 continue
             if hours <= 0:
-                issues.append(_issue(where, "non_positive_hours", "Hours must be positive."))
+                issues.append(_finding(where, "non_positive_hours", "Hours must be positive."))
                 continue
             low, high = min(refs) * RANGE_LOWER_FACTOR, max(refs) * RANGE_UPPER_FACTOR
             if not low <= hours <= high:
                 issues.append(
-                    _issue(
+                    _finding(
                         where,
                         "out_of_range",
                         f"{hours:g} h is outside {low:g}-{high:g} h, the range its references "
@@ -411,10 +487,10 @@ async def validate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
                 )
 
     if args.total_hours <= 0:
-        issues.append(_issue(None, "non_positive_total", "Total hours must be positive."))
+        issues.append(_finding(None, "non_positive_total", "Total hours must be positive."))
     elif args.total_hours > MAX_REASONABLE_TOTAL_HOURS:
         issues.append(
-            _issue(
+            _finding(
                 None,
                 "disproportionate_total",
                 f"{args.total_hours:g} h exceeds {MAX_REASONABLE_TOTAL_HOURS:g} h: check units.",
@@ -422,7 +498,7 @@ async def validate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
         )
     if abs(args.total_hours - tasks_sum) > TOTAL_TOLERANCE_HOURS:
         issues.append(
-            _issue(
+            _finding(
                 None,
                 "total_mismatch",
                 f"Total {args.total_hours:g} h differs from the sum of the tasks "
@@ -430,11 +506,11 @@ async def validate_estimate(raw_args: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
-    ok = not issues
     return {
-        "ok": ok,
+        "ok": not issues,
         "issues": issues,
-        "summary": "Estimate looks consistent." if ok else f"{len(issues)} issue(s) found.",
+        "warnings": warnings,
+        "summary": summarize_findings(issues, warnings),
     }
 
 

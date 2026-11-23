@@ -51,18 +51,18 @@ class SearchBudgetsArgs(_ToolArgs):
     filters: SearchBudgetsFilters | None = None
 
 
+class ReferenceItem(_ToolArgs):
+    """One historical item chosen as reference: where it comes from and the hours it took."""
+
+    budget_id: str = Field(min_length=1)
+    estimated_hours: float = Field(ge=0)
+
+
 class TaskReferences(_ToolArgs):
-    """One engineering task and the hours of the similar historical tasks found for it."""
+    """One engineering task and the similar historical items found for it."""
 
     name: str = Field(min_length=1)
-    reference_amounts: list[float]
-
-    @field_validator("reference_amounts")
-    @classmethod
-    def amounts_are_not_negative(cls, amounts: list[float]) -> list[float]:
-        if any(amount < 0 for amount in amounts):
-            raise ValueError("reference_amounts must be non-negative hours")
-        return amounts
+    references: list[ReferenceItem]
 
 
 class ComponentTasks(_ToolArgs):
@@ -179,6 +179,13 @@ class AgentAction(BaseModel):
     error: str | None = None
 
 
+class AgentWarning(BaseModel):
+    """A deterministic, non-blocking finding of the loop about the final answer."""
+
+    code: str
+    message: str
+
+
 class AgentStep(BaseModel):
     """One model turn: what the agent decided (reasoning), did (actions) and learned."""
 
@@ -189,6 +196,17 @@ class AgentStep(BaseModel):
     duration_ms: int = 0
     # Set when the final answer of this turn was rejected by validation and re-requested
     validation_error: str | None = None
+    # Findings about the final answer of this turn (reference ids that differ from the calculation,
+    # a stale calculation that could no longer be fixed, ...)
+    warnings: list[AgentWarning] = Field(default_factory=list)
+
+
+class Coverage(BaseModel):
+    """How much of the task list the history could price (computed by the system, not the model)."""
+
+    budgeted_tasks: int
+    total_tasks: int
+    ratio: float
 
 
 class AgentResult(BaseModel):
@@ -198,3 +216,10 @@ class AgentResult(BaseModel):
     iterations: int = 0
     usage: TokenUsage = Field(default_factory=TokenUsage)
     error: str | None = None
+    # Computed by the loop from the LAST calculate_estimate, never filled in by the model
+    coverage: Coverage | None = None
+    unbudgeted_tasks: list[str] = Field(default_factory=list)
+    # True when some task has no historical reference: it costs 0 h, so the total is a floor
+    total_is_lower_bound: bool = False
+    # Findings about the accepted final answer (e.g. ``stale_calculation``)
+    warnings: list[AgentWarning] = Field(default_factory=list)

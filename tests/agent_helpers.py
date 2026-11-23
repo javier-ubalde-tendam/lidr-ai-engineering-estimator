@@ -49,12 +49,23 @@ def final_response(response_id: str, estimate: dict[str, Any] | str) -> Any:
     return make_response(response_id, [reasoning_item("Done reasoning.")], output_text=text)
 
 
-def valid_estimate(hours: float = 120.0) -> dict[str, Any]:
+def valid_estimate(hours: float = 115.0, ids: tuple[str, ...] = ("B-1",)) -> dict[str, Any]:
+    """A valid final answer; 115 h is what ``calc_args`` (one task, one 100 h reference) costs."""
     return {
-        "components": [{"name": "Backend", "hours": hours, "reference_budget_ids": ["B-1"]}],
+        "components": [{"name": "Backend", "hours": hours, "reference_budget_ids": list(ids)}],
         "total_hours": hours,
         "notes": "grounded on B-1",
     }
+
+
+def reference(budget_id: str, hours: float) -> dict[str, Any]:
+    return {"budget_id": budget_id, "estimated_hours": hours}
+
+
+def calc_args(*tasks: dict[str, Any]) -> dict[str, Any]:
+    """``calculate_estimate`` arguments: one "Backend" component; default = one 100 h task (115 h)."""
+    default = {"name": "Payments", "references": [reference("B-1", 100.0)]}
+    return {"components": [{"name": "Backend", "tasks": list(tasks) or [default]}]}
 
 
 class FakeResponses:

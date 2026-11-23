@@ -80,7 +80,13 @@ def test_the_search_schema_exposes_only_filters_that_exist_in_the_args_model() -
 
 
 def task(name: str, *refs: float) -> dict[str, Any]:
-    return {"name": name, "reference_amounts": list(refs)}
+    """A task whose references are ``refs`` hours, with ids ``<name>-<n>``."""
+    return {
+        "name": name,
+        "references": [
+            {"budget_id": f"{name}-{n}", "estimated_hours": hours} for n, hours in enumerate(refs)
+        ],
+    }
 
 
 async def test_a_task_costs_the_median_of_its_references_plus_the_fixed_contingency() -> None:
@@ -150,6 +156,98 @@ async def test_the_totals_are_rounded_sums_and_deterministic() -> None:
     assert first["total_hours"] == round(sum(c["estimated_hours"] for c in first["components"]), 1)
 
 
+async def test_budget_ids_come_back_per_task_and_per_component_without_duplicates() -> None:
+    shared = {"budget_id": "B-SHARED", "estimated_hours": 50.0}
+    result = await calculate_estimate(
+        {
+            "components": [
+                {
+                    "name": "Backend",
+                    "tasks": [
+                        {
+                            "name": "A",
+                            "references": [
+                                {"budget_id": "B-2", "estimated_hours": 10.0},
+                                shared,
+                                {"budget_id": "B-2", "estimated_hours": 12.0},  # repeated id
+                            ],
+                        },
+                        {"name": "B", "references": [shared, {"budget_id": "B-1", "estimated_hours": 5.0}]},
+                        {"name": "C", "references": []},
+                    ],
+                }
+            ]
+        }
+    )
+
+    backend = result["components"][0]
+    task_a, task_b, task_c = backend["tasks"]
+    assert task_a["reference_budget_ids"] == ["B-2", "B-SHARED"]  # first-seen order, no duplicates
+    assert task_b["reference_budget_ids"] == ["B-SHARED", "B-1"]
+    assert task_c["reference_budget_ids"] == []
+    assert backend["reference_budget_ids"] == ["B-2", "B-SHARED", "B-1"]
+    # The median still runs over the hours of ALL the references (10, 50, 12 -> 12)
+    assert task_a["central_hours"] == 12.0 and task_a["reference_count"] == 3
+
+
+async def test_the_old_reference_amounts_format_is_rejected() -> None:
+    registry = build_tool_registry(failing_backend)
+    old = {"components": [{"name": "A", "tasks": [{"name": "t", "reference_amounts": [10]}]}]}
+
+    result = await execute_tool(registry, "calculate_estimate", json.dumps(old))
+
+    assert "error" in result and "references" in result["error"]
+
+
+async def test_a_reference_needs_a_budget_id_and_non_negative_hours() -> None:
+    registry = build_tool_registry(failing_backend)
+    bad_hours = {"budget_id": "B-1", "estimated_hours": -5}
+    no_id = {"budget_id": "", "estimated_hours": 5}
+
+    for reference in (bad_hours, no_id):
+        args = {"components": [{"name": "A", "tasks": [{"name": "t", "references": [reference]}]}]}
+        result = await execute_tool(registry, "calculate_estimate", json.dumps(args))
+        assert "error" in result
+
+
+def test_the_reference_schema_is_an_object_with_id_and_hours_in_both_tools() -> None:
+    for name in ("calculate_estimate", "validate_estimate"):
+        schema = next(s for s in TOOL_SCHEMAS if s["name"] == name)
+        text = json.dumps(schema)
+        assert "reference_amounts" not in text
+        refs = [n for n in _object_nodes(schema["parameters"]) if "budget_id" in n["properties"]]
+        assert len(refs) == 1
+        assert sorted(refs[0]["required"]) == ["budget_id", "estimated_hours"]
+        assert refs[0]["properties"]["budget_id"]["type"] == "string"
+        assert refs[0]["properties"]["estimated_hours"]["type"] == "number"
+
+
+def test_the_descriptions_do_not_contradict_the_warning_semantics() -> None:
+    validate = next(s for s in TOOL_SCHEMAS if s["name"] == "validate_estimate")["description"]
+    calculate = next(s for s in TOOL_SCHEMAS if s["name"] == "calculate_estimate")["description"]
+
+    assert "`warnings` are informative" in validate and "acceptable" in validate
+    assert "stale_calculation" in validate
+    assert "task with no reference" in validate
+    assert "pure function" in calculate and "after your last search" in calculate
+
+
+def test_coverage_of_counts_tasks_with_and_without_references() -> None:
+    from app.generation.agentic.agent_tools import coverage_of
+
+    calculation = {
+        "components": [
+            {"name": "A", "tasks": [{"name": "a1", "unbudgeted": False}, {"name": "a2", "unbudgeted": True}]},
+            {"name": "B", "tasks": [{"name": "b1", "unbudgeted": True}]},
+        ]
+    }
+
+    coverage, unbudgeted = coverage_of(calculation)
+
+    assert (coverage.budgeted_tasks, coverage.total_tasks) == (1, 3)
+    assert unbudgeted == ["A / a2", "B / b1"]
+
+
 async def test_a_component_must_have_tasks() -> None:
     registry = build_tool_registry(failing_backend)
 
@@ -164,7 +262,13 @@ async def test_a_component_must_have_tasks() -> None:
 
 
 def draft(name: str, hours: float, refs: list[float]) -> dict[str, Any]:
-    return {"name": name, "estimated_hours": hours, "reference_amounts": refs}
+    return {
+        "name": name,
+        "estimated_hours": hours,
+        "references": [
+            {"budget_id": f"{name}-{n}", "estimated_hours": ref} for n, ref in enumerate(refs)
+        ],
+    }
 
 
 def component(*tasks: dict[str, Any]) -> dict[str, Any]:
@@ -172,7 +276,12 @@ def component(*tasks: dict[str, Any]) -> dict[str, Any]:
 
 
 def codes(result: dict[str, Any]) -> set[str]:
+    """Codes of the blocking issues."""
     return {issue["code"] for issue in result["issues"]}
+
+
+def warning_codes(result: dict[str, Any]) -> set[str]:
+    return {warning["code"] for warning in result["warnings"]}
 
 
 async def test_a_consistent_draft_is_ok() -> None:
@@ -183,15 +292,43 @@ async def test_a_consistent_draft_is_ok() -> None:
         }
     )
 
-    assert result["ok"] is True and result["issues"] == []
+    assert result["ok"] is True and result["issues"] == [] and result["warnings"] == []
+    assert result["summary"] == "Estimate looks consistent."
 
 
-async def test_issues_point_at_the_component_and_task() -> None:
+async def test_findings_point_at_the_component_and_task() -> None:
     result = await validate_estimate(
         {"components": [component(draft("Tracking", 0, []))], "total_hours": 0}
     )
 
-    assert result["issues"][0]["where"] == "Backend / Tracking"
+    assert result["warnings"][0]["where"] == "Backend / Tracking"
+
+
+async def test_no_reference_is_a_warning_that_does_not_break_ok() -> None:
+    result = await validate_estimate(
+        {
+            "components": [
+                component(draft("Known", 115, [100]), draft("A", 0, []), draft("B", 0, []))
+            ],
+            "total_hours": 115,
+        }
+    )
+
+    assert result["ok"] is True and result["issues"] == []
+    assert warning_codes(result) == {"no_reference"} and len(result["warnings"]) == 2
+    assert result["summary"] == "0 issues, 2 warnings: no_reference×2"
+
+
+async def test_the_summary_counts_issues_and_warnings_with_their_codes() -> None:
+    result = await validate_estimate(
+        {
+            "components": [component(draft("A", 900, [100, 120]), draft("B", 0, []))],
+            "total_hours": 900,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["summary"] == "1 issue, 1 warning: out_of_range×1, no_reference×1"
 
 
 @pytest.mark.parametrize(
@@ -199,7 +336,7 @@ async def test_issues_point_at_the_component_and_task() -> None:
     [
         (
             {"components": [component(draft("A", 0, []))], "total_hours": 0},
-            {"no_reference", "non_positive_total"},
+            {"non_positive_total"},  # no_reference is only a warning
         ),
         (
             {"components": [component(draft("A", 900, [100, 120]))], "total_hours": 900},

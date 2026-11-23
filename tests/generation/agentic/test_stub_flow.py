@@ -55,7 +55,10 @@ def calculate_turn(kwargs: dict[str, Any]) -> Any:
             "tasks": [
                 {
                     "name": f"{name} core",
-                    "reference_amounts": [i["estimated_hours"] for i in seen[name]["items"]],
+                    "references": [
+                        {"budget_id": i["budget_id"], "estimated_hours": i["estimated_hours"]}
+                        for i in seen[name]["items"]
+                    ],
                 }
             ],
         }
@@ -70,7 +73,11 @@ def answer_turn(kwargs: dict[str, Any]) -> Any:
     calc = observations(kwargs)["calc"]
     estimate = {
         "components": [
-            {"name": c["name"], "hours": c["estimated_hours"], "reference_budget_ids": []}
+            {
+                "name": c["name"],
+                "hours": c["estimated_hours"],
+                "reference_budget_ids": c["reference_budget_ids"],
+            }
             for c in calc["components"]
         ],
         "total_hours": calc["total_hours"],
@@ -101,3 +108,10 @@ async def test_the_complex_transcript_triggers_one_search_per_component_through_
     assert result.status == "done" and result.iterations == 3
     assert result.estimate is not None and result.estimate.total_hours > 0
     assert "STEP 1" in format_trace(result) and "search_budgets(" in format_trace(result)
+    # The kit's stub items carry budget_id, so the new reference format works end to end
+    calc = next(a for step in result.trace for a in step.actions if a.tool == "calculate_estimate")
+    assert all(c["reference_budget_ids"] for c in calc.observation["components"])
+    assert result.estimate is not None
+    assert all(c.reference_budget_ids for c in result.estimate.components)
+    assert result.coverage is not None and result.coverage.ratio == 1.0
+    assert result.warnings == []

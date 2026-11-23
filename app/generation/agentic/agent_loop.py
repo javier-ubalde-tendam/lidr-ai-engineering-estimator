@@ -21,11 +21,20 @@ Loop contract (verified against the OpenAI *Function calling* guide):
   reserved: from ``max_iterations - wrap_up_turns`` on, ``tool_choice`` only allows the
   calculation/validation tools, and the last turn has no tools (``"none"``). Every continuation
   carries a short "turn N of M" notice. ``max_steps_exceeded`` stays as the safety net.
+- Freshness invariant (lives HERE, not in the pure tools): the final estimate must come from a
+  ``calculate_estimate`` made after the last ``search_budgets`` that returned evidence, report the
+  total of that calculation and cite only ``budget_id`` s that a search returned in this run. A
+  violating answer gets a corrective turn when a turn is left in which the fix is possible
+  (a turn that allows ``calculate_estimate`` for a recalculation); otherwise it is accepted and
+  flagged with a warning. Corrective turns never exceed ``max_iterations``.
+- Coverage (tasks with / without references) is computed from the last calculation by the system,
+  never reported by the model.
 """
 
 import asyncio
 import json
 import time
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import structlog
@@ -33,19 +42,35 @@ from openai import OpenAIError
 from pydantic import ValidationError
 
 from app.generation.agentic.agent_schemas import (
+    TOTAL_TOLERANCE_HOURS,
     AgentAction,
     AgentEstimate,
     AgentResult,
     AgentStep,
+    AgentWarning,
     TokenUsage,
     strict_json_schema,
 )
-from app.generation.agentic.agent_tools import TOOL_SCHEMAS, ToolRegistry, execute_tool
+from app.generation.agentic.agent_tools import (
+    TOOL_SCHEMAS,
+    ToolRegistry,
+    coverage_of,
+    execute_tool,
+    summarize_findings,
+)
 
 log = structlog.get_logger()
 
 NO_REASONING_SUMMARY = "(no reasoning summary available)"
-ARGUMENT_PREVIEW_MAX_CHARS = 300
+# Trace text is cut only above this size, and always with an explicit marker. The ``action`` of
+# calculate_estimate / validate_estimate is never cut: it is the evidence of the final numbers.
+TRACE_TEXT_MAX_CHARS = 600
+TRUNCATION_MARK = "…[truncated]"
+FULL_ACTION_TOOLS = ("calculate_estimate", "validate_estimate")
+# Closest search items listed (budget_id + hours) in the trace so the references can be audited
+TRACE_SEARCH_ITEMS = 3
+# Corrective turns the loop may spend on a semantically wrong answer (stale / ids / total)
+MAX_ANSWER_CORRECTIONS = 2
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are a software estimation agent. You receive the transcript of a client discovery meeting \
@@ -68,10 +93,14 @@ missing or weak, rephrase with more generic wording (or drop the filters) and se
 issuing all the rephrasings of that round together in the same turn. If two rephrasings still \
 give no good match, the history has no equivalent: leave the task without references, say so \
 in `notes`, and move on.
-4. Compute the numbers with the calculation tool, feeding it, for every task, the hours of its \
-relevant historical items. Do not do the cost arithmetic yourself.
-5. If a validation tool is available, validate the draft and resolve the issues it reports \
-before answering.
+4. When the search rounds are over, compute the numbers with the calculation tool, feeding it, \
+for every task, the references (budget_id and hours) of its relevant historical items. Do not do \
+the cost arithmetic yourself. Prefer one grouped round of rephrasings before calculating, instead \
+of calculating and searching alternately. If you search after calculating, calculate again: the \
+answer must rest on a calculation made after your last search.
+5. If a validation tool is available, validate the draft. Fix the `issues` it reports. The \
+`warnings` are informative: a task without references that you already declared as unbudgeted \
+is acceptable; report it in `notes` instead of searching again.
 
 Turn budget: you have at most {max_iterations} turns in total (a turn is one model response, \
 which may contain several tool calls). {reserved}An answer that arrives after the last turn is \
@@ -81,7 +110,8 @@ Rules:
 - Never invent hours for a task that has no historical evidence: it costs 0 hours; say so in \
 `notes`.
 - Each component's `hours` is the sum of its tasks. In `reference_budget_ids`, list the \
-budget_id of the historical items that support each component.
+budget_ids that the calculation returned for that component; cite only ids that a search \
+returned.
 - Hours are engineer-hours. `total_hours` is the sum of the component hours.
 - Use `notes` for assumptions, gaps in the evidence and risks.
 - Your final message must be the JSON estimate and nothing else.
@@ -242,6 +272,168 @@ def _invalid_answer_message(exc: ValidationError) -> str:
     return problems[:500]
 
 
+# --- Freshness, references and coverage (checks on the final answer) -------------------------
+
+
+@dataclass
+class _RunState:
+    """What the loop remembers across turns to judge the final answer."""
+
+    known_budget_ids: set[str] = field(default_factory=set)
+    last_search_turn: int = 0  # last turn whose search returned usable items (new evidence)
+    last_calc_turn: int = 0  # last turn with a successful calculate_estimate
+    last_calc: dict[str, Any] | None = None
+    answer_corrections: int = 0
+
+    @property
+    def calculation_is_stale(self) -> bool:
+        """True when evidence arrived at or after the last calculation (same turn = unseen)."""
+        return self.last_search_turn > 0 and self.last_search_turn >= self.last_calc_turn
+
+    def stale_message(self) -> str:
+        calc = f"turn {self.last_calc_turn}" if self.last_calc_turn else "none yet"
+        return (
+            f"New evidence arrived after your last calculation (search results at turn "
+            f"{self.last_search_turn}, last calculation: {calc})."
+        )
+
+
+@dataclass
+class _Problem:
+    code: str
+    message: str
+    needs_recalculation: bool = False
+
+    def as_warning(self) -> AgentWarning:
+        return AgentWarning(code=self.code, message=self.message)
+
+
+def _record_actions(state: _RunState, iteration: int, actions: list[AgentAction]) -> None:
+    """Update the run state with the successful tool calls of a turn."""
+    for action in actions:
+        if action.error:
+            continue
+        if action.tool == "search_budgets":
+            items = action.observation.get("items") or []
+            state.known_budget_ids |= {
+                str(item["budget_id"]) for item in items if item.get("budget_id")
+            }
+            if items:
+                state.last_search_turn = iteration
+        elif action.tool == "calculate_estimate":
+            state.last_calc_turn = iteration
+            state.last_calc = action.observation
+
+
+def _flag_stale_validations(state: _RunState, actions: list[AgentAction]) -> None:
+    """A validation of a stale calculation is not an error: it gets a deterministic warning."""
+    if not state.calculation_is_stale:
+        return
+    for action in actions:
+        if action.tool != "validate_estimate" or action.error:
+            continue
+        warnings = action.observation.setdefault("warnings", [])
+        warnings.append(
+            {
+                "where": None,
+                "code": "stale_calculation",
+                "message": f"{state.stale_message()} Recalculate before answering.",
+            }
+        )
+        action.observation["summary"] = summarize_findings(
+            action.observation.get("issues", []), warnings
+        )
+
+
+def _normalized(name: str) -> str:
+    return " ".join(name.split()).casefold()
+
+
+def _can_recalculate(iteration: int, max_iterations: int, tools: list[dict[str, Any]]) -> bool:
+    """Is there a turn after ``iteration`` that allows tools AND leaves one more to answer?"""
+    return any(
+        _tool_choice(turn, max_iterations, tools) != "none"
+        for turn in range(iteration + 1, max_iterations)
+    )
+
+
+def _review_answer(
+    state: _RunState, estimate: AgentEstimate, tools: list[dict[str, Any]]
+) -> tuple[list[_Problem], list[AgentWarning]]:
+    """Deterministic checks of a valid final answer: blocking problems and soft warnings."""
+    problems: list[_Problem] = []
+    soft: list[AgentWarning] = []
+    can_calculate = any(tool.get("name") == "calculate_estimate" for tool in tools)
+
+    if can_calculate and state.calculation_is_stale:
+        problems.append(
+            _Problem(
+                "stale_calculation",
+                f"{state.stale_message()} Call calculate_estimate again with the current "
+                "references and answer with its result.",
+                needs_recalculation=True,
+            )
+        )
+    calc = state.last_calc
+    if calc is not None and abs(estimate.total_hours - calc["total_hours"]) > TOTAL_TOLERANCE_HOURS:
+        problems.append(
+            _Problem(
+                "total_differs_from_calculation",
+                f"total_hours ({estimate.total_hours:g}) differs from your last calculation "
+                f"({calc['total_hours']:g} h): report the calculated total, or recalculate.",
+            )
+        )
+
+    unknown: list[str] = []
+    for component in estimate.components:
+        ids = component.reference_budget_ids
+        duplicated = sorted({budget_id for budget_id in ids if ids.count(budget_id) > 1})
+        if duplicated:
+            problems.append(
+                _Problem(
+                    "duplicate_reference_ids",
+                    f"Component '{component.name}' repeats reference ids: {', '.join(duplicated)}.",
+                )
+            )
+        unknown += [bid for bid in ids if bid not in state.known_budget_ids and bid not in unknown]
+        if calc is not None:
+            match = next(
+                (c for c in calc["components"] if _normalized(c["name"]) == _normalized(component.name)),
+                None,
+            )
+            if match is not None and set(match["reference_budget_ids"]) != set(ids):
+                soft.append(
+                    AgentWarning(
+                        code="reference_ids_differ",
+                        message=(
+                            f"Component '{component.name}' cites {sorted(set(ids))} but the last "
+                            f"calculation returned {sorted(set(match['reference_budget_ids']))}."
+                        ),
+                    )
+                )
+    if unknown:
+        problems.append(
+            _Problem(
+                "unknown_reference_ids",
+                f"These reference_budget_ids never appeared in a search result of this run: "
+                f"{', '.join(unknown)}. Cite only ids returned by search_budgets (the calculation "
+                "returns them per component).",
+            )
+        )
+    return problems, soft
+
+
+def _correction_message(
+    problems: list[_Problem], iteration: int, max_iterations: int, tools: list[dict[str, Any]]
+) -> str:
+    reasons = " ".join(f"- {problem.message}" for problem in problems)
+    return (
+        f"Your final answer cannot be accepted yet:\n{reasons}\nFix it and reply with the "
+        f"corrected JSON estimate only, after any tool call you need. "
+        f"{_turn_notice(iteration + 1, max_iterations, tools)}"
+    )
+
+
 # --- The loop ------------------------------------------------------------------------------
 
 
@@ -274,6 +466,7 @@ async def run_agent(
     previous_response_id: str | None = None
     next_input: list[dict[str, Any]] = [{"role": "user", "content": transcript}]
     correction_sent = False
+    state = _RunState()
 
     for iteration in range(1, max_iterations + 1):
         started = time.perf_counter()
@@ -324,6 +517,7 @@ async def run_agent(
                         total_usage,
                         None,
                         "The final answer did not validate after one correction.",
+                        state=state,
                     )
                 correction_sent = True
                 next_input = [
@@ -336,12 +530,48 @@ async def run_agent(
                     }
                 ]
                 continue
+            problems, soft_warnings = _review_answer(state, estimate, tool_schemas)
+            can_answer_again = iteration < max_iterations
+            can_recalculate = _can_recalculate(iteration, max_iterations, tool_schemas)
+            fixable = [
+                problem
+                for problem in problems
+                if (can_recalculate if problem.needs_recalculation else can_answer_again)
+            ]
+            if fixable and state.answer_corrections < MAX_ANSWER_CORRECTIONS:
+                state.answer_corrections += 1
+                step.validation_error = " ".join(problem.message for problem in fixable)
+                step.duration_ms = round((time.perf_counter() - started) * 1000)
+                trace.append(step)
+                log.warning(
+                    "agent_answer_needs_correction",
+                    step=iteration,
+                    codes=[problem.code for problem in fixable],
+                )
+                next_input = [
+                    {
+                        "role": "user",
+                        "content": _correction_message(
+                            fixable, iteration, max_iterations, tool_schemas
+                        ),
+                    }
+                ]
+                continue
+            # Accepted: whatever could not be fixed (no turn left) travels as an explicit warning
+            warnings = [problem.as_warning() for problem in problems] + soft_warnings
+            step.warnings = warnings
             step.duration_ms = round((time.perf_counter() - started) * 1000)
             trace.append(step)
+            if warnings:
+                log.warning(
+                    "agent_answer_accepted_with_warnings", codes=[warning.code for warning in warnings]
+                )
             log.info("agent_step", step=iteration, tools=[], tokens=step_usage.total_tokens)
-            return _finish("done", trace, iteration, total_usage, estimate)
+            return _finish("done", trace, iteration, total_usage, estimate, state=state, warnings=warnings)
 
         step.actions = list(await asyncio.gather(*(_run_action(registry, call) for call in calls)))
+        _record_actions(state, iteration, step.actions)
+        _flag_stale_validations(state, step.actions)
         step.duration_ms = round((time.perf_counter() - started) * 1000)
         trace.append(step)
         log.info(
@@ -375,6 +605,7 @@ async def run_agent(
         total_usage,
         None,
         f"Stopped after {max_iterations} iterations without a final answer.",
+        state=state,
     )
 
 
@@ -385,6 +616,9 @@ def _finish(
     usage: TokenUsage,
     estimate: AgentEstimate | None,
     error: str | None = None,
+    *,
+    state: _RunState | None = None,
+    warnings: list[AgentWarning] | None = None,
 ) -> AgentResult:
     log.info(
         "agent_done",
@@ -393,6 +627,9 @@ def _finish(
         total_hours=estimate.total_hours if estimate else None,
         tokens=usage.total_tokens,
     )
+    coverage, unbudgeted = (
+        coverage_of(state.last_calc) if state is not None and state.last_calc else (None, [])
+    )
     return AgentResult(
         status=status,
         estimate=estimate,
@@ -400,6 +637,10 @@ def _finish(
         iterations=iterations,
         usage=usage,
         error=error,
+        coverage=coverage,
+        unbudgeted_tasks=unbudgeted,
+        total_is_lower_bound=bool(unbudgeted),
+        warnings=warnings or [],
     )
 
 
@@ -416,20 +657,69 @@ def _field(label: str, text: str) -> str:
     return "\n".join((prefix if index == 0 else padding) + line for index, line in enumerate(lines))
 
 
+def _truncate(text: str, limit: int = TRACE_TEXT_MAX_CHARS) -> str:
+    """Cut ``text`` above ``limit`` characters, always with an explicit marker."""
+    return text if len(text) <= limit else text[:limit] + TRUNCATION_MARK
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _format_full_call(action: AgentAction) -> str | None:
+    """Lossless multi-line view of a calculate/validate call, or None if it is malformed."""
+    components = action.arguments.get("components")
+    if not isinstance(components, list) or not components:
+        return None
+    lines = [f"{action.tool}("]
+    try:
+        for component in components:
+            lines.append(f"  component {_json(component['name'])}:")
+            for task in component["tasks"]:
+                refs = ", ".join(
+                    f"{ref['budget_id']}={_json(ref['estimated_hours'])}h"
+                    for ref in task["references"]
+                )
+                hours = f" -> {_json(task['estimated_hours'])} h" if "estimated_hours" in task else ""
+                lines.append(f"    - {task['name']}{hours} | refs: {refs or 'none'}")
+        if "total_hours" in action.arguments:
+            lines.append(f"  total_hours: {_json(action.arguments['total_hours'])}")
+    except (KeyError, TypeError):
+        return None
+    lines.append(")")
+    return "\n".join(lines)
+
+
 def _format_call(action: AgentAction) -> str:
-    arguments = ", ".join(
-        f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in action.arguments.items()
-    )
+    arguments = ", ".join(f"{key}={_json(value)}" for key, value in action.arguments.items())
     call = f"{action.tool}({arguments})"
-    if len(call) > ARGUMENT_PREVIEW_MAX_CHARS:
-        call = call[: ARGUMENT_PREVIEW_MAX_CHARS - 3] + "..."
-    return call
+    if action.tool in FULL_ACTION_TOOLS:
+        # Never truncated: these calls carry the numbers and references of the final estimate
+        return _format_full_call(action) or call
+    return _truncate(call)
 
 
 def _format_observation(action: AgentAction) -> str:
     if action.error:
         return f"ERROR: {action.error}"
-    return str(action.observation.get("summary") or json.dumps(action.observation)[:200])
+    observation = action.observation
+    text = str(observation.get("summary") or _truncate(_json(observation)))
+    if action.tool == "search_budgets":
+        items = sorted(observation.get("items") or [], key=lambda item: item.get("distance", 1.0))
+        closest = "; ".join(
+            f"{item.get('budget_id') or item.get('id')} {item.get('estimated_hours'):g} h "
+            f"(d={item.get('distance')})"
+            for item in items[:TRACE_SEARCH_ITEMS]
+        )
+        if closest:
+            text += f"\nclosest: {closest}"
+    findings = [("issue", i) for i in observation.get("issues") or []] + [
+        ("warning", w) for w in observation.get("warnings") or [] if w.get("code") != "no_reference"
+    ]
+    for kind, finding in findings:
+        where = f" ({finding['where']})" if finding.get("where") else ""
+        text += f"\n{kind} {finding.get('code')}{where}: {finding.get('message')}"
+    return text
 
 
 def _format_step(step: AgentStep) -> str:
@@ -445,6 +735,8 @@ def _format_step(step: AgentStep) -> str:
             else "final answer produced"
         )
         lines.append(_field("observation", outcome))
+    for warning in step.warnings:
+        lines.append(_field("warning", f"{warning.code}: {warning.message}"))
     return "\n".join(lines)
 
 
@@ -470,6 +762,27 @@ def format_trace(result: AgentResult) -> str:
                 _field("component", f"{component.name}: {component.hours:g} h (refs: {refs})")
             )
         summary.append(_field("notes", result.estimate.notes))
+    if result.coverage is not None:
+        coverage = result.coverage
+        summary.append(
+            _field(
+                "coverage",
+                f"{coverage.budgeted_tasks} of {coverage.total_tasks} tasks have historical "
+                f"references ({coverage.ratio:.0%})",
+            )
+        )
+        bound = (
+            "yes: tasks without references cost 0 h, the real effort is higher"
+            if result.total_is_lower_bound
+            else "no"
+        )
+        summary.append(_field("lower bound", f"total is a lower bound: {bound}"))
+        if result.unbudgeted_tasks:
+            summary.append(
+                _field("unbudgeted", "\n".join(f"- {name}" for name in result.unbudgeted_tasks))
+            )
+    for warning in result.warnings:
+        summary.append(_field("warning", f"{warning.code}: {warning.message}"))
     if result.error:
         summary.append(_field("error", result.error))
     blocks.append("\n".join(summary))
