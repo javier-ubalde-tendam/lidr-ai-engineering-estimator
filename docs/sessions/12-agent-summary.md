@@ -130,8 +130,8 @@ backend real con retriever falso (`RetrievalRequest` con `chunk_types=["historic
 
 ## 8. NO VERIFICADO
 
-- **Tres ejecuciones reales.
-  - Las dos primeras (`trace_complex.txt`, `trace_complex_02.txt`) `max_steps_exceeded`** . El comportamiento con la convergencia forzada del bucle y el nuevo prompt **no está medido**: hay que repetir la ejecución real. Con tareas habrá bastantes búsquedas por componente: si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
+- **Tres ejecuciones reales**
+  - Las dos primeras (`trace_complex.txt`, `trace_complex_02.txt`) `max_steps_exceeded`. El comportamiento con la convergencia forzada del bucle y el nuevo prompt **no está medido**: hay que repetir la ejecución real. Con tareas habrá bastantes búsquedas por componente: si 10 vueltas no bastan, sube `AGENT_MAX_ITERATIONS` (el endpoint admite hasta 20).
   - La tercera (`trace_complex_03_OK.txt`) finaliza pero no es del todo fiable.
 - **No contrastado con la API**: `tool_choice` como `allowed_tools` (`mode: "auto"`, lista de funciones por nombre) y como `"none"` en una petición con `previous_response_id`, `text.format` estricto y reasoning. Está en el SDK instalado (`ToolChoiceAllowedParam`) y en la guía oficial, pero no se ha ejecutado. Si la API lo rechazase (400), el síntoma sería un `502` en la vuelta 8.
 - Verificado contra la guía oficial *Function calling*: tools planas con `strict`, `function_call_output` con `call_id`, varias llamadas por respuesta, `previous_response_id` con `instructions` reenviadas, `["tipo","null"]` para opcionales.
