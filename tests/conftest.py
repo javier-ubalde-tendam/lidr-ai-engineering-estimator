@@ -15,6 +15,10 @@ os.environ["LOG_LEVEL"] = "INFO"
 # Claves obviamente falsas: los routers protegidos nunca dependen de las del .env local
 os.environ["RETRIEVAL_API_KEY"] = "test-retrieval-key"
 os.environ["ESTIMATE_API_KEY"] = "test-estimate-key"
+# Session 13: tests never open the Postgres checkpointer or export Logfire traces
+os.environ["GRAPH_ENABLED"] = "false"
+os.environ["LOGFIRE_TOKEN"] = ""
+os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"  # spans of un-configured tests are no-ops, silently
 
 from app.api.rate_limiting import limiter
 from app.logging_config import configure_logging

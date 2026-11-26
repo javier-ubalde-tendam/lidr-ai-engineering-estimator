@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     AGENT_SEARCH_TOP_K: int = Field(default=5, ge=1, le=30)
     AGENT_SEARCH_DISTANCE_THRESHOLD: float = Field(default=0.6, ge=0, le=2)
 
+    # Session 13 - LangGraph estimation workflow (POST /v1/estimate/graph).
+    # GRAPH_ENABLED=false skips the Postgres checkpointer at startup (the endpoint then answers 503)
+    GRAPH_ENABLED: bool = True
+    GRAPH_EXTRACTION_MODEL: str = "gpt-4o-mini"
+    GRAPH_GENERATION_MODEL: str = "gpt-5-mini"
+    # Logfire export only happens with a token. Settings reads .env but does NOT export it to
+    # os.environ, so observability.py passes it to logfire.configure explicitly
+    LOGFIRE_TOKEN: str | None = None
+    LOGFIRE_SERVICE_NAME: str = "ai-service"
+
     # Session 10 live - advanced multi-index retrieval; each stage is independently switchable
     RETRIEVAL_ROUTING_ENABLED: bool = True
     QUERY_TRANSFORM_ENABLED: bool = True

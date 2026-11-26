@@ -34,7 +34,8 @@ def _layer(module: str) -> tuple[str, str | None]:
     if top == "foundation":
         return "foundation", None
     if top == "domain":
-        if len(parts) > 2 and parts[2] == "estimation_service":
+        # domain/graph (Session 13) composes generation + foundation: same layer as the conductor
+        if len(parts) > 2 and parts[2] in {"estimation_service", "graph"}:
             return "conductor", None
         return "schemas", None
     if top == "generation":

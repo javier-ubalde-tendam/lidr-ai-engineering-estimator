@@ -30,15 +30,17 @@ app/
 ├── logging_config.py       # structlog (propio de este proyecto)
 │
 ├── foundation/             # plomería sin opinión de arquitectura AI
+│   ├── observability.py    #   configure_logfire(): Logfire no-op seguro (S13; no confundir con generation/rag/observability.py)
 │   ├── llm/                #   wrapper.py (LLMWrapper + call_structured), streaming.py, runtime_config.py (overrides en Redis)
 │   ├── prompts/            #   loader Jinja2 + plantillas versionadas (estimation/v1..v4, critic, ...)
 │   ├── guardrails/         #   input (moderación + injection + PII) / output (filtro de scope)
 │   ├── attachments/        #   extracción de texto de PDF/DOCX
-│   └── persistence/        #   engine/sesiones async, Base declarativa, filas y repositorios de ingesta
+│   └── persistence/        #   engine/sesiones async, Base declarativa, filas y repositorios de ingesta, checkpointer.py (LangGraph, S13)
 │
 ├── domain/                 # contrato + conductor
 │   ├── schemas/            #   EstimationRequest/Result/Response, ACBResponse, CriticFeedback, ...
-│   └── estimation_service.py  # EstimationService — ÚNICO punto de composición
+│   ├── estimation_service.py  # EstimationService — ÚNICO punto de composición
+│   └── graph/              #   (S13) grafo de LangGraph: state, schemas, nodes, build. Capa *conductor*: compone generation + foundation
 │
 ├── generation/
 │   ├── cag/                #   exact.py + semantic.py
@@ -51,7 +53,8 @@ app/
 └── api/                    # transporte: routers finos, sin lógica de negocio
     ├── estimations.py, sessions.py, embeddings.py, search.py, ingestion.py, config.py
     ├── security.py, rate_limiting.py, errors.py, request_context.py
-    └── routers/            #   retrieval, retrieval_advanced, estimate, estimate_stages, estimate_tasks, estimate_agent, corpus_index
+    ├── graph_runtime.py    #   (S13) graph_lifespan: Logfire + checkpointer + grafo compilado en app.state.graph
+    └── routers/            #   retrieval, retrieval_advanced, estimate, estimate_stages, estimate_tasks, estimate_agent, estimate_graph, corpus_index
 ```
 
 ## 3. Reglas de dependencias (MUST / MUST NOT)
@@ -62,11 +65,16 @@ app/
 | `foundation/*` | `config`, `logging_config` | `domain`, `generation`, `ingestion`, `api` |
 | `domain/schemas/*` | `config`, `foundation` | `generation`, `api` |
 | `generation/<x>/*` | `config`, `foundation`, `domain/schemas`, su propio paquete | `api`, `dependencies`, el conductor, **otro hermano de `generation`** |
-| `domain/estimation_service.py` (CONDUCTOR) | todos los hermanos de `generation`, `foundation`, `schemas` | `api`, `dependencies` |
+| `domain/estimation_service.py` y `domain/graph/*` (CONDUCTOR) | todos los hermanos de `generation`, `foundation`, `schemas` | `api`, `dependencies` |
 | `ingestion/*` | `config`, `foundation`, `domain/schemas`, `generation` | `api`, el conductor |
 | `api/*` | `dependencies`, `domain`, `foundation`, tipos y servicios de `generation` | lógica de negocio |
 | `dependencies.py` (COMPOSITION ROOT) | cualquier capa | (lo importan solo `api/` y los tests) |
 | `main.py` | `api`, `foundation`, `config` | — |
+| `foundation/observability.py`, `foundation/persistence/checkpointer.py` | solo `config` (y librerías externas) | el resto de capas |
+| `api/graph_runtime.py` | lo que puede `api/*`, incl. `dependencies` | lógica de negocio |
+
+**Sin ciclos entre conductores**: `domain/graph` puede importar de `domain/estimation_service` (misma capa),
+pero `estimation_service.py` NO importa `domain/graph`.
 
 **Aristas especiales**: `agentic` **puede** importar `conversation` (la inversa está prohibida); los
 hermanos de `generation` se encuentran **solo** en el conductor.
@@ -106,6 +114,21 @@ de `generation.conversation.models` (tipos de valor), igual que en la solución 
 - Endpoint: `POST /v1/estimate/agent` (`api/routers/estimate_agent.py`, fino: auth, 5/min, validación de
   overrides, 503/502). Detalle en [docs/sessions/12-agent.md](docs/sessions/12-agent.md).
 
+### El grafo de la Sesión 13 (`domain/graph/`)
+
+- `state.py` (`EstimationState` con dos reducers acumuladores: `budget_matches` y `errors`), `schemas.py`
+  (E/S de los nodos LLM), `nodes.py` (cinco nodos + `flag_for_review` + `route_after_validation`), `build.py`
+  (`build_graph(checkpointer, deps)`, acepta `None`).
+- **Inyección, no service locator**: los nodos son funciones de módulo `async def node(state, deps) -> dict` y
+  reciben un `GraphDependencies` (`llm_wrapper`, `search_backend`, `settings`, dataclass congelado). `build.py`
+  los enlaza con closures. Nada de `from app.dependencies import ...` dentro de `domain/graph`.
+- **Arranque**: `main.py` no puede importar `dependencies`/`domain`, así que `api/graph_runtime.py` (`graph_lifespan`)
+  construye las dependencias reales (el backend de `search_budgets` es el mismo closure sobre RAG que usa el agente
+  S12), abre el checkpointer Postgres y deja el grafo en `app.state.graph`. Si Postgres no está disponible el
+  servicio arranca igual con `graph = None` (el endpoint responde 503); `GRAPH_ENABLED=false` lo desactiva.
+- Endpoint: `POST /v1/estimate/graph` (`api/routers/estimate_graph.py`, fino). Detalle en
+  [docs/sessions/13-graph.md](docs/sessions/13-graph.md).
+
 Los endpoints RAG de las sesiones 9-11 (`/v1/estimate/from-transcript`, `/v1/estimate/stages/*`,
 `/v1/estimate/tasks/hours`, `/v1/retrieval/*`) no mezclan hermanos de `generation` (solo RAG): los
 sirven directamente `TranscriptEstimator` / `TaskHoursEstimator` / `retrieve()`. **Cuando RAG entre en
@@ -140,6 +163,9 @@ POST /api/v1/estimate
 | Backend LLM, plantilla de prompt, guardrail nuevo | `foundation/` |
 | Retrieval, chunking, vector store, embeddings, calidad de generación | `generation/rag/` |
 | Rol de agente, tools del agente o paso de orquestación | `generation/agentic/` |
+| Nodo o arista nuevos del grafo de estimación | `domain/graph/` (los colaboradores entran por `GraphDependencies`) |
+| Checkpointer, exportadores de trazas, plomería de observabilidad | `foundation/persistence/checkpointer.py`, `foundation/observability.py` |
+| Cableado del grafo al arrancar la app | `api/graph_runtime.py` |
 | Estrategia de cache | `generation/cag/` |
 | Memoria conversacional | `generation/conversation/` |
 | Endpoint HTTP | `api/` (fino) + factory en `dependencies.py` |

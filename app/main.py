@@ -9,12 +9,14 @@ from slowapi.errors import RateLimitExceeded
 from app.api import config as config_api
 from app.api.embeddings import router as embeddings_router
 from app.api.estimations import router as estimations_router
+from app.api.graph_runtime import graph_lifespan
 from app.api.ingestion import router as ingestion_router
 from app.api.ingestion import warm_up_catalog
 from app.api.rate_limiting import limiter, rate_limit_exceeded_handler
 from app.api.routers.corpus_index import router as corpus_index_router
 from app.api.routers.estimate import router as estimate_router
 from app.api.routers.estimate_agent import router as estimate_agent_router
+from app.api.routers.estimate_graph import router as estimate_graph_router
 from app.api.routers.estimate_stages import router as estimate_stages_router
 from app.api.routers.estimate_tasks import router as estimate_tasks_router
 from app.api.routers.retrieval import router as retrieval_router
@@ -32,10 +34,12 @@ _MAX_REQUEST_ID_LENGTH = 128
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sin conexiones al arrancar (el pool es perezoso); al parar se cierra el engine si se usó
     warm_up_catalog()
-    yield
+    # Session 13: Logfire + Postgres checkpointer + compiled graph (app.state.graph; None if unavailable)
+    async with graph_lifespan(app):
+        yield
     await dispose_engine()
 
 
@@ -89,6 +93,8 @@ app.include_router(retrieval_advanced_router)
 app.include_router(estimate_router)
 # Session 12: tool-calling agent with a manual loop (POST /v1/estimate/agent)
 app.include_router(estimate_agent_router)
+# Session 13: LangGraph estimation workflow with Postgres checkpointer (POST /v1/estimate/graph)
+app.include_router(estimate_graph_router)
 # Didactic extras (8c): the pipeline one stage at a time, per-task hours, incremental corpus growth
 app.include_router(estimate_stages_router)
 app.include_router(estimate_tasks_router)

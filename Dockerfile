@@ -52,6 +52,8 @@ COPY --chown=app:app alembic.ini streamlit_app.py query_examples.py ./
 COPY --chown=app:app scripts ./scripts
 COPY --chown=app:app data ./data
 COPY --chown=app:app evals ./evals
+# Sample transcripts used by scripts/run_agent_s12.py and scripts/run_graph_s13.py
+COPY --chown=app:app exercises ./exercises
 
 USER app
 
