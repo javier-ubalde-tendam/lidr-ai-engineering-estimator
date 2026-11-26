@@ -21,7 +21,7 @@ HOURS = {"Payments": [100.0]}
 async def span_names(capfire: CaptureLogfire, estimate_hours: float) -> list[str]:
     estimate = estimate_of(("Payments", estimate_hours, ["B-Pay-0"]))
     graph = build_graph(None, make_deps(ScriptedLLM(estimate, COMPONENTS), ScriptedSearch(HOURS)))
-    await graph.ainvoke({"transcript": TRANSCRIPT})
+    await graph.ainvoke({"transcript": TRANSCRIPT, "estimation_id": "run-7"})
     return [span["name"] for span in capfire.exporter.exported_spans_as_dict()]
 
 
@@ -41,3 +41,10 @@ async def test_review_branch_opens_the_flag_span(capfire: CaptureLogfire) -> Non
     names = await span_names(capfire, 900.0)  # far above 1.5 x the only reference
 
     assert "node: flag_for_review" in names
+
+
+async def test_spans_carry_the_estimation_id(capfire: CaptureLogfire) -> None:
+    await span_names(capfire, 100.0)
+    spans = [x for x in capfire.exporter.exported_spans_as_dict() if x["name"].startswith("node: ")]
+
+    assert spans and all(x["attributes"]["estimation_id"] == "run-7" for x in spans)

@@ -1,54 +1,51 @@
-ESTIMATION 1c31e315-fc1a-4ae1-86a6-25e7de5b3137
+ESTIMATION s13-complex-run-1
 
 REQUIREMENTS
-  - Desarrollar una plataforma logística llamada RUTA que unifique las funciones actuales distribuidas en cuatro sitios distintos.
-  - El backend de negocio debe incluir gestión de pedidos, asignación de rutas, seguimiento de envíos y cálculo de tarifas, y debe exponer una API para su uso.
-  - La plataforma debe integrarse con el ERP SAP, mapeando IDocs y gestionando reintentos a través de una capa de middleware.
-  - Desarrollar una app móvil para repartidores en Android e iOS que permita ver la hoja de ruta del día, confirmar entregas con firma y foto, y que funcione en modo offline con sincronización al reestablecer la conexión.
-  - La app móvil debe ser muy simple de usar, dado que los repartidores no son técnicos.
-  - Crear un panel de analítica con cuadros de mando que incluya KPIs de entregas a tiempo, costes por ruta y incidencias, y que permita filtrar por zona y por cliente.
-  - El panel de analítica debe incluir alertas para situaciones anómalas.
-  - El backend y la integración con SAP son la prioridad principal del proyecto, mientras que la app móvil y el panel de analítica pueden desarrollarse posteriormente.
-  - El equipo interno utiliza Python y React para el front, pero no hay restricciones de tecnología específicas para el desarrollo del proyecto.
-  - La app móvil puede ser nativa o híbrida, dependiendo de lo que resulte más eficaz.
+  - Desarrollar una plataforma llamada RUTA que unifique sistemas actuales en cuatro sitios distintos.
+  - Crear un backend de negocio que gestione pedidos, asigne rutas, realice el seguimiento de envíos y calcule tarifas, exponiendo una API.
+  - Integrar la plataforma con el ERP SAP para sincronizar facturación, clientes y maestro de artículos, incluyendo mapeo de IDocs y gestión de reintentos.
+  - Desarrollar una app móvil para repartidores que funcione en Android e iOS, permitiendo ver hoja de ruta, confirmar entregas con firma y foto, y operar en modo offline con sincronización posterior.
+  - Crear un panel de analítica con cuadros de mando que incluya KPIs de entregas a tiempo, costes por ruta e incidencias, con capacidades de filtrado y alertas.
+  - Priorizar el desarrollo del backend de negocio y la integración con SAP en la fase inicial del proyecto.
+  - Utilizar Python y React para el desarrollo del frontend, con la opción de elegir entre una app móvil nativa o híbrida.
+  - Permitir la elección de la base de datos a utilizar en el desarrollo de la plataforma.
 
 COMPONENTS
-  - Backend de Negocio [backend]
-  - Integración con ERP SAP [integration]
-  - App Móvil para Repartidores [frontend]
-  - Panel de Analítica [frontend]
-  - Middleware de Comunicación [infrastructure]
+  - RUTA [backend]
+  - Backend de negocio [backend]
+  - Integración ERP SAP [integration]
+  - App móvil para repartidores [frontend]
+  - Panel de analítica [frontend]
+  - Base de datos [data]
 
 BUDGET MATCHES (engineer-hours)
-  - Backend de Negocio: TASK-2024-0060 = 24 h (distance 0.53)
-  - Backend de Negocio: TASK-2025-0017 = 48 h (distance 0.53)
-  - Backend de Negocio: TASK-2024-0012 = 26 h (distance 0.53)
-  - Backend de Negocio: TASK-2023-0057 = 31 h (distance 0.55)
-  - Backend de Negocio: TASK-2024-0060 = 34 h (distance 0.56)
-  - App Móvil para Repartidores: TASK-2024-0018 = 29 h (distance 0.50)
-  - App Móvil para Repartidores: TASK-2023-0050 = 28 h (distance 0.50)
-  - App Móvil para Repartidores: TASK-2025-0045 = 33 h (distance 0.52)
-  - App Móvil para Repartidores: TASK-2023-0057 = 24 h (distance 0.53)
-  - App Móvil para Repartidores: TASK-2025-0045 = 29 h (distance 0.55)
-  - Panel de Analítica: TASK-2022-0030 = 53 h (distance 0.48)
-  - Panel de Analítica: TASK-2022-0001 = 50 h (distance 0.49)
-  - Panel de Analítica: TASK-2024-0016 = 30 h (distance 0.50)
-  - Panel de Analítica: TASK-2025-0042 = 44 h (distance 0.50)
-  - Panel de Analítica: TASK-2024-0060 = 35 h (distance 0.51)
-  - Middleware de Comunicación: TASK-2024-0023 = 43 h (distance 0.56)
-  - Middleware de Comunicación: TASK-2023-0022 = 51 h (distance 0.56)
-  - Middleware de Comunicación: TASK-2022-0027 = 49 h (distance 0.56)
-  - Middleware de Comunicación: TASK-2025-0042 = 19 h (distance 0.56)
-  - Middleware de Comunicación: TASK-2022-0001 = 55 h (distance 0.56)
+  - Backend de negocio: TASK-2023-0057 = 31 h (distance 0.55)
+  - Backend de negocio: TASK-2022-0027 = 42 h (distance 0.55)
+  - Backend de negocio: TASK-2024-0060 = 24 h (distance 0.55)
+  - Backend de negocio: TASK-2024-0012 = 26 h (distance 0.56)
+  - Backend de negocio: TASK-2025-0017 = 48 h (distance 0.56)
+  - Integración ERP SAP: TASK-2023-0046 = 24 h (distance 0.59)
+  - Integración ERP SAP: TASK-2025-0025 = 48 h (distance 0.60)
+  - App móvil para repartidores: TASK-2024-0018 = 29 h (distance 0.49)
+  - App móvil para repartidores: TASK-2023-0050 = 28 h (distance 0.50)
+  - App móvil para repartidores: TASK-2025-0045 = 33 h (distance 0.51)
+  - App móvil para repartidores: TASK-2023-0057 = 24 h (distance 0.52)
+  - App móvil para repartidores: TASK-2025-0045 = 29 h (distance 0.54)
+  - Panel de analítica: TASK-2022-0030 = 53 h (distance 0.48)
+  - Panel de analítica: TASK-2022-0001 = 50 h (distance 0.48)
+  - Panel de analítica: TASK-2024-0016 = 30 h (distance 0.50)
+  - Panel de analítica: TASK-2025-0042 = 44 h (distance 0.50)
+  - Panel de analítica: TASK-2024-0060 = 35 h (distance 0.51)
 
 ESTIMATE (engineer-hours)
-  - Backend de Negocio (backend): 31 h  refs=TASK-2024-0060, TASK-2025-0017, TASK-2024-0012, TASK-2023-0057
-  - Integración con ERP SAP (integration): 0 h  refs=-
-  - App Móvil para Repartidores (frontend): 29 h  refs=TASK-2024-0018, TASK-2023-0050, TASK-2025-0045, TASK-2023-0057
-  - Panel de Analítica (frontend): 44 h  refs=TASK-2022-0030, TASK-2022-0001, TASK-2024-0016, TASK-2025-0042, TASK-2024-0060
-  - Middleware de Comunicación (infrastructure): 49 h  refs=TASK-2024-0023, TASK-2023-0022, TASK-2022-0027, TASK-2025-0042, TASK-2022-0001
-  TOTAL: 153 h
-  NOTES: Each component is anchored on the median of its historical hours as provided. Integración con ERP SAP has no historical references so it is assigned 0 hours (do not guess) and the total is therefore a lower bound.
+  - RUTA (backend): 0 h  refs=-
+  - Backend de negocio (backend): 31 h  refs=TASK-2023-0057, TASK-2022-0027, TASK-2024-0060, TASK-2024-0012, TASK-2025-0017
+  - Integración ERP SAP (integration): 36 h  refs=TASK-2023-0046, TASK-2025-0025
+  - App móvil para repartidores (frontend): 29 h  refs=TASK-2024-0018, TASK-2023-0050, TASK-2025-0045, TASK-2023-0057
+  - Panel de analítica (frontend): 44 h  refs=TASK-2022-0030, TASK-2022-0001, TASK-2024-0016, TASK-2025-0042, TASK-2024-0060
+  - Base de datos (data): 0 h  refs=-
+  TOTAL: 140 h
+  NOTES: Hours anchored to the median of historical hours for each component. Components with no historical references (RUTA and Base de datos) are assigned 0 hours and therefore the total is a lower bound; do not guess hours where no history exists.
 
 STATUS: validated
 

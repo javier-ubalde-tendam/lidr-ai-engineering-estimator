@@ -98,7 +98,7 @@ async def _structured(
 
 
 async def extract_requirements(state: EstimationState, deps: GraphDependencies) -> dict[str, Any]:
-    with logfire.span("node: extract_requirements"):
+    with logfire.span("node: extract_requirements", estimation_id=state.get("estimation_id")):
         extraction = await _structured(
             deps,
             system_prompt=EXTRACT_SYSTEM_PROMPT,
@@ -111,7 +111,7 @@ async def extract_requirements(state: EstimationState, deps: GraphDependencies) 
 
 
 async def classify_components(state: EstimationState, deps: GraphDependencies) -> dict[str, Any]:
-    with logfire.span("node: classify_components"):
+    with logfire.span("node: classify_components", estimation_id=state.get("estimation_id")):
         requirements = state.get("requirements", [])
         if not requirements:
             return {
@@ -141,7 +141,7 @@ def _component_query(component: Component) -> str:
 
 
 async def search_budgets(state: EstimationState, deps: GraphDependencies) -> dict[str, Any]:
-    with logfire.span("node: search_budgets"):
+    with logfire.span("node: search_budgets", estimation_id=state.get("estimation_id")):
         matches: list[BudgetMatch] = []
         errors: list[str] = []
         # One component after another on purpose: parallel fan-out (Send) is out of scope here
@@ -192,7 +192,7 @@ def _generation_message(state: EstimationState) -> str:
 
 
 async def generate_estimate(state: EstimationState, deps: GraphDependencies) -> dict[str, Any]:
-    with logfire.span("node: generate_estimate"):
+    with logfire.span("node: generate_estimate", estimation_id=state.get("estimation_id")):
         if not state.get("components"):
             return {"estimate": None, "errors": ["generate_estimate: no components to estimate"]}
         result = await _structured(
@@ -241,7 +241,9 @@ def _validation_args(state: EstimationState, estimate: dict[str, Any]) -> dict[s
 async def validate_and_consolidate(
     state: EstimationState, deps: GraphDependencies
 ) -> dict[str, Any]:
-    with logfire.span("node: validate_and_consolidate") as span:
+    with logfire.span(
+        "node: validate_and_consolidate", estimation_id=state.get("estimation_id")
+    ) as span:
         estimate = state.get("estimate")
         if not estimate:
             return {"status": STATUS_NEEDS_REVIEW, "errors": ["no_estimate: nothing to validate"]}
@@ -259,7 +261,7 @@ async def validate_and_consolidate(
 
 
 async def flag_for_review(state: EstimationState, deps: GraphDependencies) -> dict[str, Any]:
-    with logfire.span("node: flag_for_review"):
+    with logfire.span("node: flag_for_review", estimation_id=state.get("estimation_id")):
         return {
             "status": STATUS_NEEDS_REVIEW,
             "errors": ["flagged for human review: the estimate did not pass validation"],
